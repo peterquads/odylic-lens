@@ -264,7 +264,7 @@ def start(request: Request):
 
 
 @router.get("/callback")
-def callback(code: str = "", state: str = "", error: str = "", error_description: str = ""):
+def callback(request: Request, code: str = "", state: str = "", error: str = "", error_description: str = ""):
     """OAuth callback handler. Exchanges code → token, persists, redirects to web app."""
     if error:
         return RedirectResponse(
@@ -335,9 +335,18 @@ def callback(code: str = "", state: str = "", error: str = "", error_description
     except Exception as e:
         print(f"[auth] account sync at login failed: {e}", flush=True)
 
-    # 4) Issue a session cookie and bounce back to the web app
+    # 4) Issue a session cookie and bounce back to the web app. Standalone
+    # flows (the Funnel Viewer) set a short-lived `lens_setup_return` cookie
+    # before starting OAuth — cookies are per-host (ports ignored on
+    # localhost), so it survives the facebook.com round-trip. Same-site
+    # relative paths only; default stays the Lens /brands page.
+    ret = "/brands"
+    raw = urlparse.unquote(request.cookies.get("lens_setup_return", "") or "")
+    if raw.startswith("/") and not raw.startswith("//"):
+        ret = raw
     sid = create_session(fb_user_id)
-    resp = RedirectResponse(url=f"{_web_origin()}/brands", status_code=302)
+    resp = RedirectResponse(url=f"{_web_origin()}{ret}", status_code=302)
+    resp.delete_cookie("lens_setup_return")
     resp.set_cookie(
         key="lens_session",
         value=sid,

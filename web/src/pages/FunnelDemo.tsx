@@ -86,7 +86,11 @@ export default function FunnelDemo() {
           <h1 className="text-text-primary" style={{
             fontFamily: "'Helvetica Neue', Inter, system-ui, -apple-system, sans-serif",
             fontWeight: 200, fontSize: 24, letterSpacing: '0.015em', lineHeight: 1,
-            transform: 'translateY(-4px)',
+            // Optical baseline match to the wordmark PNG: the logo's ink
+            // baseline sits ~24px below its box top at 32px render height
+            // (the PNG has heavy internal padding), so the 24px text needs
+            // a +4px push to share that baseline. Measured, not eyeballed.
+            transform: 'translateY(4px)',
           }}>Funnel Viewer</h1>
           {!live && (
             <span className="px-2 py-0.5 rounded-full text-[10px] font-sans uppercase tracking-[0.12em] bg-black/[0.05] text-text-muted"

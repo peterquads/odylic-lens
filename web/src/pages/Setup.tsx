@@ -32,6 +32,9 @@ export function setupReturnPath(): string {
   }
 }
 const IS_FUNNEL_FLOW = () => setupReturnPath().includes("funnel");
+// Product name for user-facing copy — this wizard serves both Lens and the
+// standalone Funnel Viewer.
+const PRODUCT = () => (IS_FUNNEL_FLOW() ? "the Funnel Viewer" : "Lens");
 
 // Short labels keep every pill the same shape — the stepper is a
 // progress indicator, not a place to fit a full sentence.
@@ -127,6 +130,9 @@ export default function Setup({ auth }: { auth: AuthStatus | null }) {
 // ─────────────────────────────────────────────────────────────────────
 
 function Stepper({ step, setStep }: { step: number; setStep: (n: number) => void }) {
+  // The Funnel Viewer flow ends at Connect — Integrations (Anthropic/Atria)
+  // are Lens features and only confuse funnel recipients.
+  const steps = IS_FUNNEL_FLOW() ? STEPS.filter((s) => s.id !== 6) : STEPS;
   return (
     // Use grid instead of flex-wrap so every pill is the same width and
     // a lonely pill on the last row (e.g. "6. Optional integrations" when
@@ -142,7 +148,7 @@ function Stepper({ step, setStep }: { step: number; setStep: (n: number) => void
       margin: 0,
       paddingBottom: 16,
     }}>
-      {STEPS.map((s) => {
+      {steps.map((s) => {
         const isActive = s.id === step;
         const isDone = s.id < step;
         const color = isActive ? "var(--color-text-primary)" : isDone ? "var(--color-text-secondary)" : "var(--color-text-muted)";
@@ -200,7 +206,7 @@ function StepPrereqs({ next }: { next: () => void }) {
                 <a href="https://business.facebook.com" target="_blank" rel="noreferrer">
                   Meta Business Manager
                 </a>{" "}
-                where your role is Admin or Advertiser. Lens will read whatever your Meta user can read, nothing more.
+                where your role is Admin or Advertiser. {PRODUCT()} will read whatever your Meta user can read, nothing more.
               </>
             ),
           },
@@ -218,7 +224,7 @@ function StepPrereqs({ next }: { next: () => void }) {
         ]}
       />
       <Callout tone="ok">
-        <strong>Account-safety note.</strong> Dev mode is the safe choice and Meta designed it for this exact case (developers using their own apps on their own data). It never expires. What gets accounts banned is scraping data you don't own, sharing tokens across many users, hitting rate limits in the thousands per hour, or selling Meta data. none of which Lens does. Publishing your app to Live actually <em>increases</em> Meta's scrutiny.
+        <strong>Account-safety note.</strong> Dev mode is the safe choice and Meta designed it for this exact case (developers using their own apps on their own data). It never expires. What gets accounts banned is scraping data you don't own, sharing tokens across many users, hitting rate limits in the thousands per hour, or selling Meta data. none of which {PRODUCT()} does. Publishing your app to Live actually <em>increases</em> Meta's scrutiny.
       </Callout>
       <Callout tone="info">
         <strong>You don't need any of these:</strong> App Review, business verification, privacy-policy URL, Terms of Service URL, App icon, Category, "Switch to Live mode," "Add to App Review" buttons, App Domains entry, Authorize callback URL on the Advanced page, Domain manager, Data Deletion callback. Any banner asking for these is for going Live, which you're not doing.
@@ -248,7 +254,7 @@ function StepCreateApp({ next, back }: { next: () => void; back: () => void }) {
         <li>
           <strong>App details:</strong>
           <ul>
-            <li><strong>App name</strong>. anything you'll recognize. Example: <Mono>Odylic Lens (your name)</Mono></li>
+            <li><strong>App name</strong>. anything you'll recognize. Example: <Mono>{IS_FUNNEL_FLOW() ? "Funnel Viewer (your name)" : "Odylic Lens (your name)"}</Mono></li>
             <li><strong>App contact email</strong>. your email</li>
           </ul>
           Click <Pill>Next</Pill>.
@@ -284,7 +290,7 @@ function StepVerifyPerms({ next, back }: { next: () => void; back: () => void })
     <Card>
       <h2>Verify the permissions</h2>
       <p style={{ color: "var(--color-text-secondary)" }}>
-        Picking the use case automatically requested the permissions Lens needs. This step is a quick sanity check that they show the right status.
+        Picking the use case automatically requested the permissions {PRODUCT()} needs. This step is a quick sanity check that they show the right status.
       </p>
       <ol className="numbered">
         <li>
@@ -307,7 +313,7 @@ function StepVerifyPerms({ next, back }: { next: () => void; back: () => void })
         <strong>"Marketing API Access Tier" = "Limited access" is fine.</strong> The Limited tier caps you at 25 ad accounts and standard rate limits. Single-user self-hosted never trips that.
       </Callout>
       <Callout tone="warn">
-        <strong>Do NOT click "+ Add to App Review"</strong> on any of these: <Mono>catalog_management</Mono>, <Mono>email</Mono>, <Mono>pages_manage_ads</Mono>, <Mono>threads_business_basic</Mono>, <Mono>Business Asset User Profile Access</Mono>. Lens doesn't use them and App Review wastes weeks for permissions you'll never call.
+        <strong>Do NOT click "+ Add to App Review"</strong> on any of these: <Mono>catalog_management</Mono>, <Mono>email</Mono>, <Mono>pages_manage_ads</Mono>, <Mono>threads_business_basic</Mono>, <Mono>Business Asset User Profile Access</Mono>. They aren't used here, and App Review wastes weeks for permissions you'll never call.
       </Callout>
       <Nav back={back} next={next} nextLabel="Permissions look right →" />
     </Card>
@@ -390,7 +396,7 @@ function StepCredentials({
         label="OAuth Redirect URI"
         hint={
           <>
-            Auto-detected from your Lens API port. Used only by Meta to bounce you back after OAuth. Localhost is auto-allowed by Meta in Dev mode, so you don't register it anywhere in the Meta console. it just works.
+            Auto-detected from the local API port. Used only by Meta to bounce you back after OAuth. Localhost is auto-allowed by Meta in Dev mode, so you don't register it anywhere in the Meta console. it just works.
           </>
         }
       >
@@ -449,6 +455,10 @@ function StepTestConnect({ back, onNextOptional }: { back: () => void; onNextOpt
   async function connect() {
     setConnecting(true);
     try {
+      // Tell the API where to land after the OAuth round-trip. Cookies are
+      // per-host (ports ignored), so the :8765 callback can read a cookie
+      // set by the :5173 page. 15-min TTL; the callback clears it.
+      document.cookie = `lens_setup_return=${encodeURIComponent(setupReturnPath())}; path=/; max-age=900`;
       const { authorize_url } = await endpoints.authStart();
       window.location.href = authorize_url;
     } catch (e: any) {
@@ -466,8 +476,11 @@ function StepTestConnect({ back, onNextOptional }: { back: () => void; onNextOpt
     <Card>
       <h2>Test &amp; connect</h2>
       <p style={{ color: "var(--color-text-secondary)" }}>
-        Test validates your App ID + Secret with Meta. If green, click Connect Meta and authorize on facebook.com. you'll be redirected back to Lens with your real ad accounts populated.
+        Two moves and you're done. <strong>1) Test</strong> — validates the App ID + Secret you pasted (runs automatically; green means Meta accepted them). <strong>2) Connect Meta</strong> — sends you to facebook.com to authorize, then bounces you straight back to {PRODUCT()} with your ad accounts connected.
       </p>
+      <Callout tone="info">
+        Log in on facebook.com with the <strong>same Facebook account that created the app</strong> in Step 2. A different account will hit Meta's "App not active" wall, because Dev-mode apps only admit their own Admins/Developers/Testers.
+      </Callout>
 
       <button className="btn secondary" onClick={runCheck} disabled={testing}>
         {testing ? "Testing…" : "Re-run test"}
@@ -498,6 +511,13 @@ function StepTestConnect({ back, onNextOptional }: { back: () => void; onNextOpt
                   <strong>Hint:</strong> {check.hint}
                 </div>
               ) : null}
+              {/deleted/i.test(check.error || "") ? (
+                <div style={{ marginTop: 8 }}>
+                  <strong>App deleted?</strong> The saved App ID points to a Meta app that no longer
+                  exists. Go back to <strong>Step 2</strong>, create a fresh app, then paste the new
+                  App ID + Secret in <strong>Step 4</strong>.
+                </div>
+              ) : null}
             </Callout>
           )}
         </div>
@@ -514,7 +534,7 @@ function StepTestConnect({ back, onNextOptional }: { back: () => void; onNextOpt
         nextLabel={connecting ? "Redirecting…" : "Connect Meta →"}
         nextDisabled={!check?.ok || connecting}
         extraLeft={
-          onNextOptional ? (
+          onNextOptional && !IS_FUNNEL_FLOW() ? (
             <button className="btn secondary" onClick={onNextOptional}>
               Optional integrations →
             </button>
@@ -609,7 +629,7 @@ function Troubleshooting() {
         q: "\"Error validating client secret.\" / \"Token exchange failed.\"",
         a: (
           <>
-            Most common cause: you rotated the App Secret in Meta and the OLD one is still saved here in Lens. Go to <Pill>App settings → Basic</Pill> in Meta, click <Pill>Show</Pill> next to App Secret, copy the current value, then come back to Step 4 and re-paste. The Step 5 test will catch this before you ever click Connect.
+            Most common cause: you rotated the App Secret in Meta and the OLD one is still saved here. Go to <Pill>App settings → Basic</Pill> in Meta, click <Pill>Show</Pill> next to App Secret, copy the current value, then come back to Step 4 and re-paste. The Step 5 test will catch this before you ever click Connect.
           </>
         ),
       },
@@ -617,7 +637,7 @@ function Troubleshooting() {
         q: "After clicking Connect Meta I get \"Not Found\" on a localhost URL",
         a: (
           <>
-            Meta redirected you back to the wrong port. Lens's redirect URI was set to one port (e.g. <Mono>:3001</Mono>) but the API is running on another (e.g. <Mono>:3201</Mono>), so Meta bounced you to a port that doesn't host Lens. Fix: make sure the OAuth Redirect URI in Step 4 matches the actual port the Lens API listens on (check <Mono>/api/status</Mono>). If you're running both Lens and Atelier, they cannot share port 3001.
+            Meta redirected you back to the wrong port. The saved redirect URI points at one port but the API is running on another, so Meta bounced you somewhere nothing is listening. Fix: make sure the OAuth Redirect URI in Step 4 matches the actual port the local API listens on (check <Mono>/api/status</Mono>). If you run several local tools, each needs its own port.
           </>
         ),
       },
@@ -625,7 +645,7 @@ function Troubleshooting() {
         q: "I see \"http://localhost redirects are automatically allowed…\" when I try to add the URI to Meta",
         a: (
           <>
-            Good news. that's Meta confirming you don't need to add it. Localhost is auto-allowed in Dev mode. Click the red X to dismiss your entry and skip the step entirely. Lens uses the URI internally for OAuth start; Meta accepts any <Mono>http://localhost</Mono> redirect when the app is in Dev mode.
+            Good news. that's Meta confirming you don't need to add it. Localhost is auto-allowed in Dev mode. Click the red X to dismiss your entry and skip the step entirely. The app uses the URI internally for OAuth start; Meta accepts any <Mono>http://localhost</Mono> redirect when the app is in Dev mode.
           </>
         ),
       },
@@ -641,7 +661,7 @@ function Troubleshooting() {
         q: "I see \"Authorize callback URL\" under App settings → Advanced. is that the redirect URI?",
         a: (
           <>
-            No. That field is for <em>native and desktop apps only</em> (notice the "Native or desktop app?" toggle directly above it). Lens is a web app. Leave it empty. The OAuth redirect URI you care about is under <Pill>Facebook Login for Business → Settings → Client OAuth settings → Valid OAuth Redirect URIs</Pill>. and even there, you don't need to add anything because localhost is auto-allowed.
+            No. That field is for <em>native and desktop apps only</em> (notice the "Native or desktop app?" toggle directly above it). This is a web app. Leave it empty. The OAuth redirect URI you care about is under <Pill>Facebook Login for Business → Settings → Client OAuth settings → Valid OAuth Redirect URIs</Pill>. and even there, you don't need to add anything because localhost is auto-allowed.
           </>
         ),
       },
@@ -649,7 +669,7 @@ function Troubleshooting() {
         q: "Where is \"App Domains\"? Some tutorials say to add localhost there.",
         a: (
           <>
-            It exists at <Pill>App settings → Basic → App domains</Pill>, but you can leave it empty. Older tutorials are out of date. Meta now auto-allows localhost in Dev mode without any allowlist entry. Only fill App Domains if you deploy Lens to a public domain (add <Mono>lens.yourdomain.com</Mono> as a chip).
+            It exists at <Pill>App settings → Basic → App domains</Pill>, but you can leave it empty. Older tutorials are out of date. Meta now auto-allows localhost in Dev mode without any allowlist entry. Only fill App Domains if you deploy to a public domain (add <Mono>app.yourdomain.com</Mono> as a chip).
           </>
         ),
       },
@@ -681,7 +701,7 @@ function Troubleshooting() {
         q: "OAuth loops, hangs, or \"This is taking longer than usual\"",
         a: (
           <>
-            Clear cookies for <Mono>facebook.com</Mono> and your Lens domain, then retry. If you have multiple Facebook accounts open in other tabs, log out of all of them except the one that owns the Meta App. Some Chrome extensions (privacy / tracking blockers) also break the OAuth bounce. test in an incognito window.
+            Clear cookies for <Mono>facebook.com</Mono> and <Mono>localhost</Mono>, then retry. If you have multiple Facebook accounts open in other tabs, log out of all of them except the one that owns the Meta App. Some Chrome extensions (privacy / tracking blockers) also break the OAuth bounce. test in an incognito window.
           </>
         ),
       },
@@ -689,7 +709,7 @@ function Troubleshooting() {
         q: "Token expired after 60 days",
         a: (
           <>
-            User access tokens last ~60 days. When yours expires, you'll see a yellow chip in Lens's topbar. Click Connect Meta again. Lens re-issues a fresh 60-day token without re-prompting permissions. For zero-touch production deploys, generate a <strong>System User token</strong> in Business Manager (no expiry) and paste it as <Mono>META_SYSTEM_USER_TOKEN</Mono> in <Mono>.env</Mono>. System User token UI in Lens is planned for v0.2.
+            User access tokens last ~60 days. When yours expires, you'll be asked to reconnect. Click Connect Meta again and a fresh 60-day token is issued without re-prompting permissions. For zero-touch production deploys, generate a <strong>System User token</strong> in Business Manager (no expiry) and paste it as <Mono>META_SYSTEM_USER_TOKEN</Mono> in <Mono>.env</Mono>. System User token support in the UI is planned.
           </>
         ),
       },
@@ -697,7 +717,7 @@ function Troubleshooting() {
         q: "\"Switch to Live mode?\" Should I?",
         a: (
           <>
-            No. Live mode requires App Review (4–6 weeks), business verification, a privacy-policy URL, a Terms of Service URL, an App icon (1024×1024), and a screencast demo. It's only useful when you want users <em>other than the app's Admins/Developers/Testers</em> to connect. Self-hosted Lens runs forever in Dev mode under "Ready for testing." Going Live actually <em>increases</em> Meta's scrutiny of your app and your Facebook account.
+            No. Live mode requires App Review (4–6 weeks), business verification, a privacy-policy URL, a Terms of Service URL, an App icon (1024×1024), and a screencast demo. It's only useful when you want users <em>other than the app's Admins/Developers/Testers</em> to connect. Self-hosted, this runs forever in Dev mode under "Ready for testing." Going Live actually <em>increases</em> Meta's scrutiny of your app and your Facebook account.
           </>
         ),
       },
@@ -705,7 +725,7 @@ function Troubleshooting() {
         q: "Will Meta ban my account for using a dev-mode app?",
         a: (
           <>
-            No. Meta designed Dev mode for exactly this case. developers using their own apps on their own data. What gets accounts banned is scraping accounts you don't own, sharing tokens across many users, hitting rate limits in the thousands per hour, or selling Meta data to third parties. Lens does none of those. Standard Access / "Ready for testing" is indefinite.
+            No. Meta designed Dev mode for exactly this case. developers using their own apps on their own data. What gets accounts banned is scraping accounts you don't own, sharing tokens across many users, hitting rate limits in the thousands per hour, or selling Meta data to third parties. This tool does none of those. Standard Access / "Ready for testing" is indefinite.
           </>
         ),
       },
@@ -713,7 +733,7 @@ function Troubleshooting() {
         q: "I accidentally shared my App Secret in a screenshot or commit",
         a: (
           <>
-            Treat it as compromised. Go to <Pill>App settings → Basic</Pill> in Meta, click <Pill>Reset</Pill> next to App Secret, copy the new value, and paste it into Lens Step 4 (re-save credentials). The old secret is immediately invalidated.
+            Treat it as compromised. Go to <Pill>App settings → Basic</Pill> in Meta, click <Pill>Reset</Pill> next to App Secret, copy the new value, and paste it into Step 4 (re-save credentials). The old secret is immediately invalidated.
           </>
         ),
       },
