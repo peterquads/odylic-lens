@@ -16,6 +16,23 @@ import { IntegrationCard } from "./ApiSettings";
  *   - Dev mode being indefinitely sustainable for self-hosted
  */
 
+// Where to land after finishing setup. The standalone Funnel Viewer passes
+// ?return=/funnel-demo; stash it in sessionStorage so the OAuth round-trip
+// to facebook.com and back doesn't lose it. Default stays the Lens flow.
+export function setupReturnPath(): string {
+  try {
+    const q = new URLSearchParams(window.location.search).get("return");
+    if (q && q.startsWith("/")) {
+      sessionStorage.setItem("setup_return", q);
+      return q;
+    }
+    return sessionStorage.getItem("setup_return") || "/brands";
+  } catch {
+    return "/brands";
+  }
+}
+const IS_FUNNEL_FLOW = () => setupReturnPath().includes("funnel");
+
 // Short labels keep every pill the same shape — the stepper is a
 // progress indicator, not a place to fit a full sentence.
 const STEPS = [
@@ -68,11 +85,13 @@ export default function Setup({ auth }: { auth: AuthStatus | null }) {
             lineHeight: 1,
             marginTop: 6,
           }}>
-            lens
+            {IS_FUNNEL_FLOW() ? "funnel viewer" : "lens"}
           </span>
         </div>
         <div className="label" style={{ marginBottom: 8 }}>Onboarding</div>
-        <h1 style={{ marginBottom: 8 }}>Connect Meta to Odylic Lens</h1>
+        <h1 style={{ marginBottom: 8 }}>
+          Connect Meta to {IS_FUNNEL_FLOW() ? "the Funnel Viewer" : "Odylic Lens"}
+        </h1>
         <p style={{ color: "var(--color-text-secondary)", fontSize: 13, margin: 0 }}>
           5 minutes. You'll create your own Meta App, verify the right permissions,
           and paste credentials. Nothing leaves your machine. You stay in Meta's
@@ -567,10 +586,10 @@ function StepOptionalIntegrations({ back }: { back: () => void }) {
 
       <Nav
         back={back}
-        onNext={() => nav("/brands")}
+        onNext={() => nav(setupReturnPath())}
         nextLabel="Save and finish →"
         extraLeft={
-          <button className="btn secondary" onClick={() => nav("/brands")}>
+          <button className="btn secondary" onClick={() => nav(setupReturnPath())}>
             Skip
           </button>
         }
