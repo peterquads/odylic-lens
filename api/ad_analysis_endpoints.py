@@ -1537,6 +1537,131 @@ def _fetch_ad_insights_with_breakdowns(
 
 
 # ---------------------------------------------------------------------------
+# Real funnel mix. Meta's `user_segment_key` breakdown reports the ACTUAL
+# spend Meta delivered to prospecting (New) / engaged (MOF) / existing (BOF)
+# per ad — verified live to work at ad level across ASC *and* manual
+# campaigns. This replaces the old frequency+CPMr *guess* with a real,
+# per-creative segment blend. An `unknown` bucket exists and can be large
+# (~15% for some accounts), so we keep it as a first-class value rather than
+# forcing every dollar into a lane.
+#
+# Resilience: Meta relabels these segments periodically. We normalize by
+# prefix/substring into four stable buckets and ALSO keep the raw labels in
+# `_raw`, so a rename degrades gracefully into `unknown` instead of breaking.
+# ---------------------------------------------------------------------------
+
+def _normalize_segment(raw: Optional[str]) -> str:
+    """Map a raw Meta ``user_segment_key`` value to a stable bucket.
+
+    Stable buckets: prospecting | engaged | existing | unknown. Matching is
+    deliberately loose (prefix/substring) so Meta's periodic relabels still
+    land somewhere sensible; anything unrecognized falls to ``unknown``.
+    """
+    s = (raw or "").strip().lower()
+    if not s or s in ("unknown", "none", "n/a", "not_available"):
+        return "unknown"
+    if s.startswith("prospect") or s.startswith("new") or "acquisition" in s:
+        return "prospecting"
+    if s.startswith("engag") or "consider" in s:
+        return "engaged"
+    if (s.startswith("exist") or s.startswith("repeat") or "purchas" in s
+            or "customer" in s or "return" in s or "retention" in s or "loyal" in s):
+        return "existing"
+    return "unknown"
+
+
+def _empty_segment_spend() -> dict:
+    return {"prospecting": 0.0, "engaged": 0.0, "existing": 0.0, "unknown": 0.0, "_raw": {}}
+
+
+def _fetch_ad_segment_spend(account_id: str, start: str, end: str, token: str) -> dict[str, dict]:
+    """``{ad_id: {prospecting, engaged, existing, unknown, _raw}}`` from the
+    ``user_segment_key`` breakdown. Best-effort: any failure returns ``{}`` so
+    the creatives endpoint (critical infra) never breaks on this enrichment.
+    """
+    try:
+        rows = _fetch_ad_insights_with_breakdowns(
+            account_id, start, end, token, "user_segment_key"
+        )
+    except Exception as e:  # noqa: BLE001 — enrichment must never be fatal
+        print(f"[funnel] user_segment_key breakdown failed: {e}", flush=True)
+        return {}
+    out: dict[str, dict] = {}
+    for r in rows:
+        ad_id = r.get("ad_id")
+        if not ad_id:
+            continue
+        ad_id = str(ad_id)
+        raw = r.get("user_segment_key") or "unknown"
+        seg = _normalize_segment(raw)
+        spend = float(r.get("spend", 0) or 0)
+        entry = out.setdefault(ad_id, _empty_segment_spend())
+        entry[seg] += spend
+        entry["_raw"][raw] = entry["_raw"].get(raw, 0.0) + spend
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Reactivation inference. Meta has no native "reactivation" segment, so we
+# infer it from ad-set targeting: an ad set that INCLUDES a customer/purchaser
+# custom audience AND EXCLUDES another audience (i.e. suppresses recent buyers)
+# is a winback/lapsed-customer shape. Also matches obvious name conventions.
+# Best-effort; targeting names aren't guaranteed, so this is a hint, not truth.
+# ---------------------------------------------------------------------------
+_REACTIVATION_NAME_RE = re.compile(
+    r"react|re-?engage|win-?back|winback|lapsed|dormant|churn|lost", re.I
+)
+_CUSTOMER_AUD_RE = re.compile(
+    r"purchas|customer|buyer|order|ltv|vip|klaviyo|subscriber|list|retention", re.I
+)
+
+
+def _is_reactivation_adset(adset: dict) -> bool:
+    name = adset.get("name") or ""
+    if _REACTIVATION_NAME_RE.search(name):
+        return True
+    t = adset.get("targeting") or {}
+    incl = t.get("custom_audiences") or []
+    excl = t.get("excluded_custom_audiences") or []
+    has_customer_incl = any(
+        _CUSTOMER_AUD_RE.search(a.get("name") or "") for a in incl if isinstance(a, dict)
+    )
+    # Including a customer list while excluding *any* audience is the classic
+    # winback suppression shape (include buyers, exclude recent buyers).
+    return has_customer_incl and len(excl) > 0
+
+
+def _fetch_adset_reactivation(account_id: str, token: str) -> set[str]:
+    """Set of ad-set ids that look like reactivation/winback. Best-effort."""
+    import requests as req
+
+    params = {
+        "access_token": token,
+        "fields": "id,name,targeting",
+        "limit": 200,
+    }
+    url = f"https://graph.facebook.com/{META_API_VERSION}/{account_id}/adsets"
+    flagged: set[str] = set()
+    next_url: Optional[str] = None
+    try:
+        for _ in range(20):
+            resp = req.get(next_url or url, params=None if next_url else params, timeout=120)
+            data = resp.json()
+            if "error" in data:
+                _note_meta_rate_limit(data["error"])
+                break
+            for a in data.get("data", []):
+                if _is_reactivation_adset(a):
+                    flagged.add(str(a.get("id")))
+            next_url = data.get("paging", {}).get("next")
+            if not next_url:
+                break
+    except Exception as e:  # noqa: BLE001 — enrichment must never be fatal
+        print(f"[funnel] adset reactivation fetch failed: {e}", flush=True)
+    return flagged
+
+
+# ---------------------------------------------------------------------------
 # Image URL normalization. strip Meta's `stp=` transform to get full-res
 # ---------------------------------------------------------------------------
 #
@@ -2597,6 +2722,12 @@ def _list_creatives_impl(brand: str, start: str, end: str, limit: int = 100) -> 
     insights.sort(key=lambda r: float(r.get("spend", 0) or 0), reverse=True)
     insights = [r for r in insights if float(r.get("spend", 0) or 0) > 0][:limit]
 
+    # Real funnel mix (user_segment_key) + inferred reactivation flag. Both are
+    # best-effort enrichments fetched once per brand; failures degrade to empty
+    # so the core creatives payload always ships.
+    segment_by_ad = _fetch_ad_segment_spend(account_id, start, end, token)
+    reactivation_adsets = _fetch_adset_reactivation(account_id, token)
+
     # Fetch creative metadata for each ad. If Meta's rate-limit cooldown
     # trips mid-loop, stop calling Meta and still return what we've built
     # so far. better than a blank page. The frontend will receive 503 on
@@ -2646,6 +2777,11 @@ def _list_creatives_impl(brand: str, start: str, end: str, limit: int = 100) -> 
         }
         merged["creative_hash"] = _creative_hash(creative)
         merged["is_video"] = bool(creative.get("video_id"))
+        # Real per-creative funnel mix + inferred reactivation. Drives lane
+        # placement in the Hypothetical Funnel Viewer (replaces the freq/CPMr
+        # guess). Empty blend is a valid state (ad had no segmented delivery).
+        merged["segment_spend"] = segment_by_ad.get(str(ad_id)) or _empty_segment_spend()
+        merged["reactivation"] = str(row.get("adset_id")) in reactivation_adsets
         # Parse naming conventions on both ad + adset so the UI can light
         # up Funnel / Bidding / Persona-hint columns without a round trip.
         merged["name_convention"] = {

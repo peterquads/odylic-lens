@@ -8,6 +8,8 @@ interface DatePickerProps {
   compareEnd?: string
   onApply: (start: string, end: string, compareStart?: string, compareEnd?: string) => void
   onClose: () => void
+  /** Hide the compare-period UI entirely (e.g. Funnel Viewer). */
+  hideCompare?: boolean
 }
 
 const PRESETS = [
@@ -140,7 +142,7 @@ function MiniCal({ year, month, start, end, compareStart, compareEnd, onSelect, 
   )
 }
 
-export function DatePicker({ start, end, compareStart, compareEnd, onApply, onClose }: DatePickerProps) {
+export function DatePicker({ start, end, compareStart, compareEnd, onApply, onClose, hideCompare }: DatePickerProps) {
   const [tempStart, setTempStart] = useState(start)
   const [tempEnd, setTempEnd] = useState(end)
   const [picking, setPicking] = useState<'start' | 'end'>('start')
@@ -248,6 +250,7 @@ export function DatePicker({ start, end, compareStart, compareEnd, onApply, onCl
             </div>
 
             {/* Compare section */}
+            {!hideCompare && (
             <div className="border-t border-black/[0.06] pt-2.5">
               <label className="inline-flex items-center gap-1.5 mb-2 cursor-pointer h-7 px-2.5 rounded-full text-[11px] transition-colors"
                 style={compareOn
@@ -337,6 +340,7 @@ export function DatePicker({ start, end, compareStart, compareEnd, onApply, onCl
                 </div>
               )}
             </div>
+            )}
 
             {/* Footer */}
             <div className="flex items-center justify-between mt-3 pt-2 border-t border-black/[0.06]">

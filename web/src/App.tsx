@@ -6,13 +6,15 @@
 
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
-import { Loader2, Sparkles, Settings as SettingsIcon, KeyRound, LogOut } from 'lucide-react'
+import { Loader2, Sparkles, Settings as SettingsIcon, KeyRound, LogOut, Layers3 } from 'lucide-react'
+import { LiveFunnelView } from './components/LiveFunnelView'
 import { AdAnalysisView, preloadAds } from './components/AdAnalysisView'
 import { BrandSelector } from './components/BrandSelector'
 import { DatePicker } from './components/DatePicker'
 import Landing from './pages/Landing'
 import Setup from './pages/Setup'
 import ApiSettings from './pages/ApiSettings'
+const FunnelDemoView = lazy(() => import('./pages/FunnelDemo'))
 import { endpoints, type AuthStatus } from './lib/api'
 
 const BrandSettingsView = lazy(() =>
@@ -46,13 +48,13 @@ function defaultDateRange(): { start: string; end: string } {
   return { start: fmt(start), end: fmt(yesterday) }
 }
 
-type Tab = 'creatives' | 'brand' | 'settings'
+type Tab = 'funnel' | 'creatives' | 'brand' | 'settings'
 
 function Shell({ auth, onLogout }: { auth: AuthStatus; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const q = new URLSearchParams(window.location.search).get('tab')
-    if (q === 'brand' || q === 'settings') return q
-    return 'creatives'
+    if (q === 'creatives' || q === 'brand' || q === 'settings') return q
+    return 'funnel'
   })
   const [brands, setBrands] = useState<Brand[]>([])
   const [profiles, setProfiles] = useState<Record<string, { favicon?: string | null; domain?: string; description?: string }>>({})
@@ -115,6 +117,7 @@ function Shell({ auth, onLogout }: { auth: AuthStatus; onLogout: () => void }) {
         />
         <div className="w-8 h-px bg-black/[0.08] my-1" />
         {([
+          { k: 'funnel' as const, icon: Layers3, title: 'Funnel Viewer' },
           { k: 'creatives' as const, icon: Sparkles, title: 'Creative Analysis' },
           { k: 'brand' as const, icon: SettingsIcon, title: 'Brand Settings' },
           { k: 'settings' as const, icon: KeyRound, title: 'API Settings' },
@@ -217,6 +220,13 @@ function Shell({ auth, onLogout }: { auth: AuthStatus; onLogout: () => void }) {
 
         <main className="px-6 pb-8">
           <Suspense fallback={<LazyFallback />}>
+            {activeTab === 'funnel' && (
+              <LiveFunnelView
+                brand={primaryBrand}
+                start={dateRange.start}
+                end={dateRange.end}
+              />
+            )}
             {activeTab === 'creatives' && (
               <AdAnalysisView
                 brand={primaryBrand}
@@ -274,7 +284,10 @@ function RoutedApp() {
   useEffect(() => {
     if (loading) return
     if (!auth?.app_configured) {
-      if (loc.pathname !== '/setup') nav('/setup', { replace: true })
+      // / and the public demo are zero-config — let users land there without
+      // forcing them through Setup. Everything else still gets bounced.
+      const zeroConfigPaths = ['/setup', '/', '/funnel-demo']
+      if (!zeroConfigPaths.includes(loc.pathname)) nav('/setup', { replace: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth, loading])
@@ -290,6 +303,11 @@ function RoutedApp() {
   return (
     <Routes>
       <Route path="/setup" element={<Setup auth={auth} />} />
+      <Route path="/funnel-demo" element={
+        <Suspense fallback={<LazyFallback />}>
+          <FunnelDemoView />
+        </Suspense>
+      } />
       <Route path="/" element={
         auth?.app_configured && auth?.logged_in
           ? <Shell auth={auth} onLogout={handleLogout} />

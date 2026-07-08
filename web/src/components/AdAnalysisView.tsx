@@ -11,6 +11,7 @@ import {
 import { toPng } from 'html-to-image'
 import JSZip from 'jszip'
 import { FunnelView } from './FunnelView'
+import { HypotheticalFunnelView } from './HypotheticalFunnelView'
 import { DemoFunnelView } from './DemoFunnelView'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis,
@@ -183,9 +184,23 @@ export type AdCreative = {
   effective_status?: string | null   // ACTIVE | PAUSED | ARCHIVED | …
   configured_status?: string | null
   updated_time?: string | null       // ISO timestamp of last state change
+  // Real funnel mix from Meta's user_segment_key breakdown (spend $ per
+  // segment) + inferred reactivation flag. Drives the Hypothetical Funnel
+  // Viewer's lane placement. Empty/absent = no segmented delivery for this ad.
+  segment_spend?: {
+    prospecting?: number
+    engaged?: number
+    existing?: number
+    unknown?: number
+    _raw?: Record<string, number>
+  } | null
+  reactivation?: boolean
+  // Demo/sample ad (local image, no real Meta ad) → preview shows the image
+  // directly instead of fetching Meta's preview iframe.
+  is_demo?: boolean
 }
 
-type ChartMode = 'dashboard' | 'cards' | 'table' | 'bar' | 'line' | 'scatter' | 'funnel' | 'funnel-demo'
+type ChartMode = 'dashboard' | 'cards' | 'table' | 'bar' | 'line' | 'scatter' | 'funnel' | 'funnel-real' | 'funnel-demo'
 
 // Frozen snapshot payload passed by the standalone report HTML. when
 // present, every network fetch in this view is short-circuited and the
@@ -2727,6 +2742,7 @@ export function AdAnalysisView({ brand, start, end, compareStart, compareEnd, sn
             { k: 'line', icon: LineIcon, title: 'Line chart' },
             { k: 'scatter', icon: ChartScatter, title: 'Dot plot. pick X/Y axes, hover dots to preview' },
             { k: 'funnel', icon: Workflow, title: 'Funnel position. TOF/MOF/BOF lanes by freq + CPMR distance from median' },
+            { k: 'funnel-real', icon: Layers3, title: 'Funnel viewer. lanes by REAL Meta segment delivery (new/engaged/existing) + reactivation. Drag to re-tag, click to open in Meta.' },
             // funnel-demo retired. the demo-split funnels view was rarely
             // used and added noise to the toggle strip. The same cohort
             // breakdown is reachable via the per-ad detail panel's demo
@@ -2832,6 +2848,11 @@ export function AdAnalysisView({ brand, start, end, compareStart, compareEnd, sn
           ads={chartAds}
           brand={brand}
           onOpen={id => setSelectedId(id)}
+        />
+      ) : chartMode === 'funnel-real' ? (
+        <HypotheticalFunnelView
+          ads={chartAds}
+          brand={brand}
         />
       ) : chartMode === 'funnel-demo' ? (
         <DemoFunnelView
