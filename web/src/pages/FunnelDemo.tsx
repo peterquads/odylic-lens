@@ -30,6 +30,7 @@ export default function FunnelDemo() {
   // Who's connected? Drives the header CTA (connect vs. account picker).
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null)
   const [brands, setBrands] = useState<BrandRow[]>([])
+  const [brandsLoaded, setBrandsLoaded] = useState(false)
   const [picked, setPicked] = useState('')
 
   const liveBrand = brandParam || picked
@@ -55,8 +56,8 @@ export default function FunnelDemo() {
         if (ok) {
           fetch('/api/brands')
             .then(r => r.ok ? r.json() : [])
-            .then((rows: BrandRow[]) => { if (!cancelled) setBrands(Array.isArray(rows) ? rows : []) })
-            .catch(() => { /* picker just stays empty */ })
+            .then((rows: BrandRow[]) => { if (!cancelled) { setBrands(Array.isArray(rows) ? rows : []); setBrandsLoaded(true) } })
+            .catch(() => { if (!cancelled) setBrandsLoaded(true) })
         }
       })
       .catch(() => { if (!cancelled) setLoggedIn(false) })
@@ -101,22 +102,43 @@ export default function FunnelDemo() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {/* Your accounts (after connecting) */}
-          {loggedIn && brands.length > 0 && (
-            <select
-              value={picked}
-              onChange={e => setPicked(e.target.value)}
-              className="px-3 py-1.5 rounded-full text-xs glass glass-hover font-sans"
-              style={{ appearance: 'none', WebkitAppearance: 'none', cursor: 'pointer' }}
-            >
-              <option value="">{picked ? 'Back to sample' : 'View your account…'}</option>
-              {brands.map(b => (
-                <option key={b.name} value={b.name}>{b.name}</option>
-              ))}
-            </select>
+          {/* Connected → account picker (looks like a real dropdown). */}
+          {loggedIn && brandsLoaded && brands.length > 0 && (
+            <div className="relative">
+              <select
+                value={picked}
+                onChange={e => setPicked(e.target.value)}
+                className="pl-3 pr-8 py-1.5 rounded-full text-xs font-sans font-medium cursor-pointer"
+                style={{
+                  appearance: 'none', WebkitAppearance: 'none',
+                  background: picked ? 'rgba(183,65,14,0.10)' : '#ffffff',
+                  border: `1px solid ${picked ? 'rgba(183,65,14,0.30)' : 'rgba(0,0,0,0.14)'}`,
+                  color: picked ? '#b55719' : 'var(--color-text-primary)',
+                }}
+              >
+                <option value="">Choose an account ({brands.length})</option>
+                {picked && <option value="">← Back to sample</option>}
+                {brands.map(b => (
+                  <option key={b.name} value={b.name}>{b.name}</option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-neutral-500">▾</span>
+            </div>
           )}
 
-          {/* Connect CTA (before connecting) */}
+          {/* Connected but accounts still loading. */}
+          {loggedIn && !brandsLoaded && (
+            <span className="px-3 py-1.5 rounded-full text-xs glass text-text-muted">Loading your accounts…</span>
+          )}
+
+          {/* Connected but no ad accounts on this Meta user. */}
+          {loggedIn && brandsLoaded && brands.length === 0 && (
+            <span className="px-3 py-1.5 rounded-full text-xs glass text-text-muted" title="This Meta user has no ad accounts your app can read.">
+              No ad accounts found
+            </span>
+          )}
+
+          {/* Not connected → the tutorial. */}
           {loggedIn === false && (
             <a href="/setup?return=/funnel-demo"
               className="px-3 py-1.5 rounded-full text-xs font-sans font-medium"
