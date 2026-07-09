@@ -80,6 +80,8 @@ interface Card {
   dominant: keyof SegSpend
   freq: number
   cpmr: number
+  freqPct: number      // 0..1 percentile rank of freq within this account/view
+  cpmrPct: number      // 0..1 percentile rank of CPMr within this account/view
   members: number
   reactivation: boolean
   estimated: boolean   // true → lane came from freq/CPMr, not measured segments
@@ -225,7 +227,7 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
     }
 
     // First pass: shape each group; compute freq + CPMr for the fallback.
-    type Pre = Omit<Card, 'autoLane'>
+    type Pre = Omit<Card, 'autoLane' | 'freqPct' | 'cpmrPct'>
     const pre: Pre[] = []
     for (const [key, g] of groups) {
       const total = g.seg.prospecting + g.seg.engaged + g.seg.existing + g.seg.unknown
@@ -329,6 +331,8 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
 
     return pre.map(p => ({
       ...p,
+      freqPct: pctRank(freqSorted, p.freq),
+      cpmrPct: pctRank(cpmrSorted, p.cpmr),
       autoLane: p.estimated ? rangeBySaturation(p) : laneForMeasured(p),
     }))
   }, [ads])
@@ -711,32 +715,59 @@ function FunnelCard({
   onPreview: () => void
   onOpenMeta: () => void
 }) {
+  const t = card.total || 1
+  const pctChip = (v: number) => `p${Math.round(v * 100)}`   // percentile within account
+  const share = (v: number) => `${Math.round((v / t) * 100)}%`
   return (
-    <div
-      data-funnel-card
-      title={card.rep.ad_name || 'Creative'}
-      className="group relative shrink-0 rounded-md overflow-hidden bg-neutral-100 hover:ring-2 hover:ring-text-primary/25 transition-shadow select-none"
-      style={{
-        width: CARD_W, height: CARD_H,
-        border: card.estimated ? '1px dashed rgba(0,0,0,0.28)' : '1px solid rgba(0,0,0,0.08)',
-        outline: fatigued ? '2px solid rgba(217,119,6,0.55)' : undefined,
-        outlineOffset: fatigued ? -2 : undefined,
-      }}
-    >
-      <Thumbnail ad={card.rep} brand={brand} className="absolute inset-0" />
+    <div data-funnel-card className="group relative shrink-0 select-none hover:z-30"
+      style={{ width: CARD_W, height: CARD_H }}>
+      {/* Clipped visual */}
+      <div className="absolute inset-0 rounded-md overflow-hidden bg-neutral-100 group-hover:ring-2 group-hover:ring-text-primary/25 transition-shadow"
+        style={{
+          border: card.estimated ? '1px dashed rgba(0,0,0,0.28)' : '1px solid rgba(0,0,0,0.08)',
+          outline: fatigued ? '2px solid rgba(217,119,6,0.55)' : undefined,
+          outlineOffset: fatigued ? -2 : undefined,
+        }}>
+        <Thumbnail ad={card.rep} brand={brand} className="absolute inset-0" />
+        {card.members > 1 && (
+          <div className="absolute top-1 left-1 rounded-full bg-black/65 text-white font-sans font-medium tabular-nums"
+            style={{ fontSize: 9, padding: '1px 6px', backdropFilter: 'blur(4px)' }}>×{card.members}</div>
+        )}
+        {/* Hover actions: preview + open in Meta */}
+        <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{ background: 'rgba(20,20,20,0.32)' }}>
+          <button onClick={onPreview} title="Preview ad"
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-white/90 text-neutral-800 hover:bg-white shadow">{ICON_EYE}</button>
+          <button onClick={onOpenMeta} title="Open in Meta Ads Manager"
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-white/90 text-neutral-800 hover:bg-white shadow">{ICON_META}</button>
+        </div>
+      </div>
 
-      {card.members > 1 && (
-        <div className="absolute top-1 left-1 rounded-full bg-black/65 text-white font-sans font-medium tabular-nums"
-          style={{ fontSize: 9, padding: '1px 6px', backdropFilter: 'blur(4px)' }}>×{card.members}</div>
-      )}
-
-      {/* Hover actions: preview (in-app) + open in Meta Ads Manager */}
-      <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
-        style={{ background: 'rgba(20,20,20,0.32)' }}>
-        <button onClick={onPreview} title="Preview ad"
-          className="w-8 h-8 flex items-center justify-center rounded-full bg-white/90 text-neutral-800 hover:bg-white shadow">{ICON_EYE}</button>
-        <button onClick={onOpenMeta} title="Open in Meta Ads Manager"
-          className="w-8 h-8 flex items-center justify-center rounded-full bg-white/90 text-neutral-800 hover:bg-white shadow">{ICON_META}</button>
+      {/* Hover tooltip — percentiles + spend mix, escapes the clip. No $ shown. */}
+      <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-40"
+        style={{ width: 180 }}>
+        <div className="rounded-lg px-2.5 py-2 shadow-xl font-sans text-white"
+          style={{ background: 'rgba(28,28,30,0.96)', backdropFilter: 'blur(4px)' }}>
+          <div className="text-[11px] font-medium leading-snug truncate">{card.rep.ad_name || 'Creative'}</div>
+          <div className="mt-1.5 flex items-center gap-2 text-[10px] text-white/85 tabular-nums">
+            <span title="Frequency percentile (account-relative)">Freq {pctChip(card.freqPct)}</span>
+            <span className="text-white/30">·</span>
+            <span title="Cost per 1k accounts reached — percentile">CPMr {pctChip(card.cpmrPct)}</span>
+          </div>
+          {card.estimated ? (
+            <div className="mt-1 text-[9px] text-white/50">no segment delivery · placed by freq/CPMr</div>
+          ) : (
+            <div className="mt-1.5 pt-1.5 border-t border-white/12">
+              <div className="text-[8px] uppercase tracking-wider text-white/40 mb-0.5">Spend by audience</div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] tabular-nums">
+                <span><span className="text-white/50">New</span> {share(card.seg.prospecting)}</span>
+                <span><span className="text-white/50">Engaged</span> {share(card.seg.engaged)}</span>
+                <span><span className="text-white/50">Existing</span> {share(card.seg.existing)}</span>
+                <span><span className="text-white/50">Unknown</span> {share(card.seg.unknown)}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
