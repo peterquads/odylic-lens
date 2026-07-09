@@ -884,8 +884,17 @@ export function Thumbnail({
           sandbox="allow-scripts allow-same-origin"
         />
       ) : terminallyBroken && retryCount >= RETRY_LIMIT && !previewLoading ? (
-        <div className="absolute inset-0 flex items-center justify-center text-[10px] text-text-muted">
-          No preview
+        // Intentional "no preview" placeholder — reads as deliberate, not broken.
+        // Meta doesn't always return a fetchable creative image (dark posts,
+        // dynamic/catalog ads, rotated CDN signatures); the ad is still real.
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-neutral-400"
+          style={{ background: 'linear-gradient(135deg,#f3f2f0,#e9e7e3)' }} aria-label="No preview available">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2.5" />
+            <circle cx="8.5" cy="8.5" r="1.6" />
+            <path d="M21 15l-5-5L5 21" />
+          </svg>
+          <span className="text-[9px] font-sans tracking-wide">No preview</span>
         </div>
       ) : (
         <div className="absolute inset-0 ac-thumb-skeleton" aria-hidden="true" />
