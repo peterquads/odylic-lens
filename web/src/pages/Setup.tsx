@@ -188,7 +188,16 @@ function Stepper({ step, setStep }: { step: number; setStep: (n: number) => void
 // Step 1 · Prerequisites
 // ─────────────────────────────────────────────────────────────────────
 
+const CONSENT_KEY = "funnel_consent_v1";
+
 function StepPrereqs({ next }: { next: () => void }) {
+  const [agreed, setAgreed] = useState<boolean>(() => {
+    try { return localStorage.getItem(CONSENT_KEY) === "1"; } catch { return false; }
+  });
+  const toggle = (v: boolean) => {
+    setAgreed(v);
+    try { localStorage.setItem(CONSENT_KEY, v ? "1" : "0"); } catch { /* ignore */ }
+  };
   return (
     <Card>
       <h2>Before you start</h2>
@@ -229,7 +238,50 @@ function StepPrereqs({ next }: { next: () => void }) {
       <Callout tone="info">
         <strong>You don't need any of these:</strong> App Review, business verification, privacy-policy URL, Terms of Service URL, App icon, Category, "Switch to Live mode," "Add to App Review" buttons, App Domains entry, Authorize callback URL on the Advanced page, Domain manager, Data Deletion callback. Any banner asking for these is for going Live, which you're not doing.
       </Callout>
-      <Nav onlyNext onNext={next} nextLabel="Got it →" />
+
+      {/* Required consent — must acknowledge risk + terms before continuing. */}
+      <div style={{
+        marginTop: 16, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 12,
+        padding: "14px 16px", background: "rgba(0,0,0,0.015)",
+      }}>
+        <div className="label" style={{ marginBottom: 6 }}>Terms &amp; risk acknowledgment</div>
+        <p style={{ color: "var(--color-text-secondary)", fontSize: 12.5, margin: "0 0 8px", lineHeight: 1.55 }}>
+          This tool connects to Meta using <strong>your own</strong> Meta app and reads only the ad data your
+          own account can already see. It runs entirely on your machine — no data is sent to us. That said, any
+          use of the Meta Marketing API carries some risk, and Meta can restrict accounts at its discretion.
+        </p>
+        <details style={{ fontSize: 12.5, color: "var(--color-text-secondary)" }}>
+          <summary style={{ cursor: "pointer", color: "var(--color-accent)", fontWeight: 600, userSelect: "none" }}>
+            Read the full terms &amp; risk disclosure
+          </summary>
+          <div style={{ marginTop: 8, lineHeight: 1.6 }}>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              <li>You are using your <strong>own</strong> Meta Developer app and access token. You are the party
+                bound by Meta's <a href="https://developers.facebook.com/terms" target="_blank" rel="noreferrer">Platform Terms</a> and
+                <a href="https://www.facebook.com/legal/terms" target="_blank" rel="noreferrer"> Terms of Service</a>, and you're responsible for compliance.</li>
+              <li>Meta may throttle, suspend, or restrict apps or accounts for reasons within its sole discretion.
+                Connecting <em>any</em> third-party or self-hosted tool — including this one — can contribute to that risk.</li>
+              <li>This software is provided <strong>“as is,” with no warranty</strong> and no guarantee of uninterrupted
+                or error-free operation. To the maximum extent permitted by law, the authors accept no liability for
+                account actions, data loss, lost revenue, or other damages arising from its use.</li>
+              <li>Keep your app in Meta <strong>Development mode</strong>, don't share your token, don't pull data for
+                accounts you don't have rights to, and don't automate high-volume calls. The tool rate-limits its own
+                requests to stay well within Meta's limits.</li>
+              <li>Not affiliated with, endorsed by, or sponsored by Meta Platforms, Inc.</li>
+            </ul>
+          </div>
+        </details>
+        <label style={{
+          display: "flex", alignItems: "flex-start", gap: 9, marginTop: 12, cursor: "pointer",
+          fontSize: 13, color: "var(--color-text-primary)", lineHeight: 1.4,
+        }}>
+          <input type="checkbox" checked={agreed} onChange={(e) => toggle(e.target.checked)}
+            style={{ marginTop: 2, width: 16, height: 16, flexShrink: 0, accentColor: "#B7410E", cursor: "pointer" }} />
+          <span>I understand the risks, that I use my own Meta app at my own discretion, and I agree to the terms above.</span>
+        </label>
+      </div>
+
+      <Nav onlyNext onNext={next} nextLabel="Got it →" nextDisabled={!agreed} />
     </Card>
   );
 }
