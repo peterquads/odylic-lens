@@ -646,10 +646,10 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
                 <img src={previewAd.rep.image_url_hd || previewAd.rep.image_url || ''} alt={previewAd.rep.ad_name || 'ad'}
                   className="w-full h-full object-contain" />
               ) : (
-                // The full creative image (reliable) rather than Meta's preview
-                // iframe, which renders blank for many ads. Reuses the Thumbnail
-                // resolution chain + its "No preview" placeholder.
-                <Thumbnail ad={previewAd.rep} brand={brand} className="absolute inset-0" imgClassName="!object-contain" />
+                // Native Meta ad preview (video / DPA / dark-post all render as
+                // the REAL ad), with the public FB embed + static Thumbnail as
+                // fallbacks. Same strategy Atelier's Creative Analysis uses.
+                <MetaAdPreview key={previewAd.rep.ad_id} ad={previewAd.rep} brand={brand} />
               )}
             </div>
           </div>
@@ -660,6 +660,81 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
       )}
     </div>
   )
+}
+
+// Native Meta ad preview for the lightbox. Ports the strategy Atelier's
+// Creative Analysis uses so ads with no resolvable still image (video, DPA /
+// Advantage+ catalog, dark posts) render as the ACTUAL ad instead of a blank
+// or a page logo:
+//   1) Authenticated Meta preview HTML from /api/ads/preview, injected via
+//      srcDoc with the sandbox flags Meta's inner iframe needs, and upsized so
+//      the whole ad shows without the built-in 335×450 scroll-crop.
+//   2) Public Facebook post/video embed (plugins/post.php, plugins/video.php)
+//      — no token, works when the API path is rate-limited or the ad expired.
+//   3) The static Thumbnail chain (with its "No preview" placeholder).
+// Only ever mounted for one ad at a time (the open lightbox), so unlike the
+// card grid it can afford a live Graph render.
+function MetaAdPreview({ ad, brand }: { ad: AdCreative; brand: string }) {
+  const [metaHtml, setMetaHtml] = useState<string | null>(null)
+  const [metaLoading, setMetaLoading] = useState(true)
+  const [metaFailed, setMetaFailed] = useState(false)
+
+  const isVideo = !!ad.is_video
+  const bodyStr = ad.body || ''
+  const isLongStatic = bodyStr.length > 160 || bodyStr.split('\n').length > 2
+  const isCatalog = /\{\{\s*product\./i.test((ad.title || '') + ' ' + bodyStr)
+  // Match the box width (no horizontal scroll); make the inner iframe tall
+  // enough that the media + headline card clear the visible area.
+  const INNER_W = 340
+  const INNER_H = isCatalog ? 600 : isVideo ? 660 : (isLongStatic ? 720 : 640)
+  const upsize = (html: string): string =>
+    html
+      .replace(/width=["']335["']/g, `width="${INNER_W}"`)
+      .replace(/height=["']450["']/g, `height="${INNER_H}"`)
+      .replace(/scrolling=["']yes["']/g, 'scrolling="no"')
+
+  useEffect(() => {
+    let cancelled = false
+    setMetaLoading(true); setMetaFailed(false); setMetaHtml(null)
+    fetch(`/api/ads/preview?ad_id=${encodeURIComponent(ad.ad_id)}&ad_format=MOBILE_FEED_STANDARD`)
+      .then(async r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+      .then(d => { if (!cancelled) setMetaHtml(d?.body ? upsize(d.body) : null) })
+      .catch(() => { if (!cancelled) setMetaFailed(true) })
+      .finally(() => { if (!cancelled) setMetaLoading(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ad.ad_id])
+
+  const publicFallback = useMemo(() => {
+    const sid = ad.effective_object_story_id || ''
+    if (sid.includes('_')) {
+      const [pageId, postId] = sid.split('_')
+      const post = `https://www.facebook.com/${pageId}/posts/${postId}`
+      return { kind: 'iframe' as const, src: `https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(post)}&show_text=true&width=${INNER_W}` }
+    }
+    if (ad.video_permalink) {
+      return { kind: 'iframe' as const, src: `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(ad.video_permalink)}&show_text=true&width=${INNER_W}` }
+    }
+    if (ad.video_source_url) return { kind: 'video' as const, src: ad.video_source_url }
+    return null
+  }, [ad.effective_object_story_id, ad.video_permalink, ad.video_source_url])
+
+  const SANDBOX = 'allow-scripts allow-same-origin allow-popups allow-forms'
+  const frameStyle = { border: 0, display: 'block', width: '100%', height: '100%' } as const
+
+  if (metaHtml) {
+    return <iframe srcDoc={metaHtml} sandbox={SANDBOX} scrolling="no" title="Meta ad preview" className="bg-white" style={frameStyle} />
+  }
+  if (metaLoading) {
+    return <div className="w-full h-full flex items-center justify-center text-[11px] text-text-muted">Loading preview…</div>
+  }
+  if (metaFailed && publicFallback?.kind === 'video') {
+    return <video src={publicFallback.src} controls playsInline className="w-full h-full object-contain bg-black" style={{ display: 'block' }} />
+  }
+  if (metaFailed && publicFallback?.kind === 'iframe') {
+    return <iframe src={publicFallback.src} sandbox={SANDBOX} scrolling="no" title="Public ad preview" className="bg-white" style={frameStyle} />
+  }
+  return <Thumbnail ad={ad} brand={brand} className="absolute inset-0" imgClassName="!object-contain" />
 }
 
 function FunnelCard({
