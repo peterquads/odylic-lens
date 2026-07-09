@@ -674,6 +674,7 @@ export function Thumbnail({
   imgClassName = '',
   showVideoBadge = false,
   alt,
+  retryNonce = 0,
 }: {
   ad: AdCreative
   brand?: string
@@ -681,6 +682,10 @@ export function Thumbnail({
   imgClassName?: string
   showVideoBadge?: boolean
   alt?: string
+  // Bump to force a re-attempt of this thumbnail — but only if it hasn't
+  // loaded yet. Loaded thumbnails ignore it (no flicker). Used by the funnel
+  // viewer's "refresh" button and its auto-retry poll.
+  retryNonce?: number
 }) {
   // Two-stage chain. Proxy URL first (fast. Meta-signed URL already in
   // the dashboard response, server has it disk-cached or fetches once
@@ -718,7 +723,7 @@ export function Thumbnail({
   // "No preview". Retrying every few seconds covers that case without
   // requiring a manual refresh.
   const [retryCount, setRetryCount] = useState(0)
-  const RETRY_LIMIT = 2
+  const RETRY_LIMIT = 4
   const RETRY_DELAY_MS = 6_000
   // Final fallback: when every <img>-based path has failed, fetch Meta's
   // own rendered preview and render it as an iframe. This is the same
@@ -742,6 +747,20 @@ export function Thumbnail({
     setPreviewSrc(null)
     setPreviewLoading(false)
   }, [ad.ad_id])
+
+  // Manual refresh (retryNonce bumped by the funnel viewer): re-attempt the
+  // whole resolution chain, but ONLY if this thumbnail hasn't loaded — loaded
+  // ones are left alone so they don't flicker. A loaded image reloads from
+  // browser cache anyway; only the failed ones actually re-hit the network.
+  const loadedRef = useRef(loaded)
+  loadedRef.current = loaded
+  useEffect(() => {
+    if (!retryNonce || loadedRef.current) return
+    setStage(0)
+    setTerminallyBroken(false)
+    setRetryCount(0)
+    setNonce(n => n + 1)   // cache-bust the api stage so it re-fetches
+  }, [retryNonce])
 
   // Auto-retry after a terminal failure. Backend prefetches keep filling
   // disk caches in the background; by the time we retry, img-by-ad may

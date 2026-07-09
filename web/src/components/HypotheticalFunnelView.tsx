@@ -28,7 +28,6 @@
 
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react'
 import { Plus, Minus, Maximize2 } from 'lucide-react'
-import { toPng } from 'html-to-image'
 import { Thumbnail, type AdCreative } from './AdAnalysisView'
 
 interface Props {
@@ -371,34 +370,9 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
     URL.revokeObjectURL(a.href)
   }
 
-  // PNG export: snapshot the whole funnel at natural size (transform reset so
-  // it captures every lane, not just the visible viewport).
-  const [exporting, setExporting] = useState(false)
-  const exportPng = async () => {
-    const canvas = canvasRef.current
-    if (!canvas || exporting) return
-    setExporting(true)
-    const prevT = canvas.style.transform
-    const prevTr = canvas.style.transition
-    canvas.style.transition = 'none'
-    canvas.style.transform = 'translate(0px,0px) scale(1)'
-    try {
-      const url = await toPng(canvas, {
-        backgroundColor: '#f4f2ee', pixelRatio: 2, cacheBust: true,
-        width: canvas.offsetWidth, height: canvas.offsetHeight,
-      })
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${brand.replace(/[^a-z0-9]+/gi, '-')}-funnel.png`
-      a.click()
-    } catch (e) {
-      console.error('[funnel] PNG export failed', e)
-    } finally {
-      canvas.style.transform = prevT
-      canvas.style.transition = prevTr
-      setExporting(false)
-    }
-  }
+  // Bumping this re-attempts only the thumbnails that failed to load (already
+  // loaded ones just re-show from browser cache; broken ones hit Meta again).
+  const [refreshNonce, setRefreshNonce] = useState(0)
 
   // -------------------------------------------------------------------------
   // Pan + zoom.
@@ -586,12 +560,9 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
         <button onClick={exportCsv}
           className="px-2 py-0.5 rounded text-[10px] text-neutral-600 hover:bg-black/[0.05] font-sans flex items-center gap-1 border border-black/10 bg-white/70"
           title="Export ad titles + Meta links by section (CSV)">↓ CSV</button>
-        <button onClick={exportPng} disabled={exporting}
-          className="px-2 py-0.5 rounded text-[10px] text-neutral-600 hover:bg-black/[0.05] font-sans flex items-center gap-1 border border-black/10 bg-white/70 disabled:opacity-50"
-          title="Export the whole funnel as a PNG image">{exporting ? '…' : '↓ PNG'}</button>
-        <button onClick={resetView}
-          className="px-2 py-0.5 rounded text-[10px] text-neutral-500 hover:bg-black/[0.05] font-sans"
-          title="Reset view">reset</button>
+        <button onClick={() => setRefreshNonce(n => n + 1)}
+          className="px-2 py-0.5 rounded text-[10px] text-neutral-600 hover:bg-black/[0.05] font-sans flex items-center gap-1 border border-black/10 bg-white/70"
+          title="Retry the thumbnails that failed to load">↻ refresh</button>
       </div>
 
       <div ref={wrapRef} className="absolute inset-0 cursor-grab active:cursor-grabbing" onMouseDown={onCanvasMouseDown}>
@@ -627,7 +598,7 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
                       {isReact ? 'no existing-customer creatives' : 'none'}
                     </div>
                   ) : items.map(c => (
-                    <FunnelCard key={c.key} card={c} brand={brand}
+                    <FunnelCard key={c.key} card={c} brand={brand} retryNonce={refreshNonce}
                       fatigued={c.freq > 0 && c.freq >= fatigueCut}
                       onPreview={() => setPreviewAd(c)}
                       onOpenMeta={() => openInMeta(c)} />
@@ -692,9 +663,9 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
 }
 
 function FunnelCard({
-  card, brand, fatigued, onPreview, onOpenMeta,
+  card, brand, fatigued, retryNonce, onPreview, onOpenMeta,
 }: {
-  card: Card; brand: string; fatigued: boolean
+  card: Card; brand: string; fatigued: boolean; retryNonce: number
   onPreview: () => void
   onOpenMeta: () => void
 }) {
@@ -711,7 +682,7 @@ function FunnelCard({
           outline: fatigued ? '2px solid rgba(217,119,6,0.55)' : undefined,
           outlineOffset: fatigued ? -2 : undefined,
         }}>
-        <Thumbnail ad={card.rep} brand={brand} className="absolute inset-0" />
+        <Thumbnail ad={card.rep} brand={brand} className="absolute inset-0" retryNonce={retryNonce} />
         {card.members > 1 && (
           <div className="absolute top-1 left-1 rounded-full bg-black/65 text-white font-sans font-medium tabular-nums"
             style={{ fontSize: 9, padding: '1px 6px', backdropFilter: 'blur(4px)' }}>×{card.members}</div>
