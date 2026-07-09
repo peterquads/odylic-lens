@@ -64,7 +64,7 @@ EOF
 
 case "$UNAME" in
   Darwin)
-    APP="$HOME/Applications/Odylic Lens.app"
+    APP="$HOME/Applications/Odylic Funnel Viewer.app"
     mkdir -p "$APP/Contents/MacOS"
     mkdir -p "$APP/Contents/Resources"
 
@@ -76,7 +76,7 @@ case "$UNAME" in
     cat > "$APP/Contents/MacOS/launch" <<EOF
 #!/usr/bin/env bash
 $START_CMD
-open "http://localhost:\$PORT"
+open "http://localhost:\$PORT/funnel-demo"
 EOF
     chmod +x "$APP/Contents/MacOS/launch"
 
@@ -87,9 +87,9 @@ EOF
 <dict>
   <key>CFBundleExecutable</key><string>launch</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleIdentifier</key><string>com.odylic.lens</string>
-  <key>CFBundleName</key><string>Odylic Lens</string>
-  <key>CFBundleDisplayName</key><string>Odylic Lens</string>
+  <key>CFBundleIdentifier</key><string>com.odylic.funnelviewer</string>
+  <key>CFBundleName</key><string>Odylic Funnel Viewer</string>
+  <key>CFBundleDisplayName</key><string>Odylic Funnel Viewer</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.3.0</string>
   <key>CFBundleVersion</key><string>0.3.0</string>
@@ -99,20 +99,28 @@ EOF
 </plist>
 PLIST
 
-    # Generate the glassy serif "O" icon if we have Pillow and don't already
-    # have a fresh .icns in scripts/build. Falls back silently if Pillow
-    # isn't available on this machine.
-    ICNS="$LENS_DIR/scripts/build/AppIcon.icns"
-    if [ ! -f "$ICNS" ] && [ -x "$LENS_DIR/api/venv/bin/python" ]; then
-      "$LENS_DIR/api/venv/bin/python" "$LENS_DIR/scripts/make-icon.py" >/dev/null 2>&1 || true
+    # App icon = the Odylic brand PNG we already ship. Build a proper
+    # multi-resolution .icns via macOS sips + iconutil so Finder/Dock render
+    # it crisply. Falls back to the generated icon, then a raw PNG.
+    RES="$APP/Contents/Resources"
+    SRC_PNG="$LENS_DIR/web/public/odylic-icon.png"
+    if [ -f "$SRC_PNG" ] && command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+      TMP_ICON="$(mktemp -d)"; ICONSET="$TMP_ICON/AppIcon.iconset"; mkdir -p "$ICONSET"
+      for SZ in 16 32 128 256 512; do
+        sips -z $SZ $SZ "$SRC_PNG" --out "$ICONSET/icon_${SZ}x${SZ}.png" >/dev/null 2>&1 || true
+        sips -z $((SZ*2)) $((SZ*2)) "$SRC_PNG" --out "$ICONSET/icon_${SZ}x${SZ}@2x.png" >/dev/null 2>&1 || true
+      done
+      iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns" >/dev/null 2>&1 || true
+      rm -rf "$TMP_ICON"
     fi
-    if [ -f "$ICNS" ]; then
-      cp "$ICNS" "$APP/Contents/Resources/AppIcon.icns"
-    elif [ -f "$LENS_DIR/web/public/odylic-icon.png" ]; then
-      # Fallback: ship the 512px PNG as AppIcon.png (Finder will render it
-      # but at lower quality than a multi-resolution .icns).
-      cp "$LENS_DIR/web/public/odylic-icon.png" "$APP/Contents/Resources/AppIcon.png" 2>/dev/null || true
+    if [ ! -f "$RES/AppIcon.icns" ]; then
+      ICNS="$LENS_DIR/scripts/build/AppIcon.icns"
+      if [ ! -f "$ICNS" ] && [ -x "$LENS_DIR/api/venv/bin/python" ]; then
+        "$LENS_DIR/api/venv/bin/python" "$LENS_DIR/scripts/make-icon.py" >/dev/null 2>&1 || true
+      fi
+      [ -f "$ICNS" ] && cp "$ICNS" "$RES/AppIcon.icns"
     fi
+    [ -f "$RES/AppIcon.icns" ] || { [ -f "$SRC_PNG" ] && cp "$SRC_PNG" "$RES/AppIcon.png" 2>/dev/null || true; }
 
     # Force Finder/LaunchServices to re-cache the icon. Without this, the
     # bundle keeps showing the previous (or generic) icon until logout.
@@ -121,7 +129,7 @@ PLIST
       -f "$APP" >/dev/null 2>&1 || true
 
     echo "  ✓ macOS launcher: $APP"
-    echo "    Open from Applications, Spotlight, or 'open -a \"Odylic Lens\"'"
+    echo "    Open from Applications, Spotlight, or 'open -a \"Odylic Funnel Viewer\"'"
     ;;
 
   Linux)
@@ -133,7 +141,7 @@ PLIST
     cat > "$LAUNCH" <<EOF
 #!/usr/bin/env bash
 $START_CMD
-xdg-open "http://localhost:\$PORT"
+xdg-open "http://localhost:\$PORT/funnel-demo"
 EOF
     chmod +x "$LAUNCH"
 
@@ -148,7 +156,7 @@ EOF
     cat > "$DESKTOP" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Odylic Lens
+Name=Odylic Funnel Viewer
 Comment=Self-hosted Meta ad creative analysis
 Exec=$LAUNCH
 Icon=$ICON

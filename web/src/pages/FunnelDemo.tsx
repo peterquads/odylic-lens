@@ -82,20 +82,14 @@ export default function FunnelDemo() {
     <div className="h-screen w-full flex flex-col bg-bg-base overflow-hidden">
       <header className="flex-shrink-0 px-5 pt-4 pb-2 flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-3">
-          <img src="/odylic-logo.png" alt="Odylic" style={{ height: 32, display: 'block' }}
-            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
-          <h1 className="text-text-primary" style={{
-            fontFamily: "'Helvetica Neue', Inter, system-ui, -apple-system, sans-serif",
-            fontWeight: 200, fontSize: 24, letterSpacing: '0.015em', lineHeight: 1,
-            // Optical baseline match to the wordmark PNG: the logo's ink
-            // baseline sits ~24px below its box top at 32px render height
-            // (the PNG has heavy internal padding), so the 24px text needs
-            // a +4px push to share that baseline. Measured, not eyeballed.
-            transform: 'translateY(4px)',
-          }}>Funnel Viewer</h1>
+          {/* Both words are TEXT (not the padded PNG) so they share a real
+              baseline — no more pixel-nudging the logo into alignment. */}
+          <h1 className="flex items-baseline gap-2 text-text-primary" style={{ lineHeight: 1 }}>
+            <span style={{ fontFamily: "'Source Serif 4', Georgia, 'Times New Roman', serif", fontWeight: 700, fontSize: 27, letterSpacing: '-0.01em' }}>Odylic</span>
+            <span style={{ fontFamily: "'Helvetica Neue', Inter, system-ui, -apple-system, sans-serif", fontWeight: 200, fontSize: 23, letterSpacing: '0.02em' }}>Funnel Viewer</span>
+          </h1>
           {!live && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-sans uppercase tracking-[0.12em] bg-black/[0.05] text-text-muted"
-              style={{ transform: 'translateY(-3px)' }}>
+            <span className="self-center px-2 py-0.5 rounded-full text-[10px] font-sans uppercase tracking-[0.12em] bg-black/[0.05] text-text-muted">
               Sample · {GRUNS_BRAND}
             </span>
           )}

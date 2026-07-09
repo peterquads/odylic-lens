@@ -543,24 +543,9 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
     if (url) window.open(url, '_blank', 'noopener,noreferrer')
   }
 
-  // In-app ad preview — same Meta preview-iframe mechanism Creative Analysis
-  // uses. Opens a blurred modal; no performance metrics.
+  // In-app ad preview lightbox — shows the full creative image (reliable),
+  // not Meta's preview iframe (which renders blank for many ads).
   const [previewAd, setPreviewAd] = useState<Card | null>(null)
-  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
-  useEffect(() => {
-    if (!previewAd) { setPreviewSrc(null); return }
-    // Demo/sample ads have no real Meta ad — preview the local image directly.
-    if (previewAd.rep.is_demo) { setPreviewSrc(null); setPreviewLoading(false); return }
-    let cancelled = false
-    setPreviewSrc(null); setPreviewLoading(true)
-    fetch(`/api/ads/preview-iframe-src?ad_id=${encodeURIComponent(previewAd.rep.ad_id)}&ad_format=MOBILE_FEED_STANDARD`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (!cancelled && d && typeof d.src === 'string') setPreviewSrc(d.src) })
-      .catch(() => { /* leave null → show fallback */ })
-      .finally(() => { if (!cancelled) setPreviewLoading(false) })
-    return () => { cancelled = true }
-  }, [previewAd])
 
   // Step through the ads in funnel order (buttons + ← → arrow keys).
   const previewIndex = previewAd ? orderedCards.findIndex(c => c.key === previewAd.key) : -1
@@ -689,13 +674,11 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
               {previewAd.rep.is_demo ? (
                 <img src={previewAd.rep.image_url_hd || previewAd.rep.image_url || ''} alt={previewAd.rep.ad_name || 'ad'}
                   className="w-full h-full object-contain" />
-              ) : previewSrc ? (
-                <iframe src={previewSrc} title="ad preview" className="w-full h-full border-0"
-                  scrolling="no" sandbox="allow-scripts allow-same-origin" />
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-xs text-text-muted">
-                  {previewLoading ? 'Loading preview…' : 'Preview unavailable — open in Meta instead.'}
-                </div>
+                // The full creative image (reliable) rather than Meta's preview
+                // iframe, which renders blank for many ads. Reuses the Thumbnail
+                // resolution chain + its "No preview" placeholder.
+                <Thumbnail ad={previewAd.rep} brand={brand} className="absolute inset-0" imgClassName="!object-contain" />
               )}
             </div>
           </div>
