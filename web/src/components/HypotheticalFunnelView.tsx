@@ -28,6 +28,7 @@
 
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react'
 import { Plus, Minus, Maximize2 } from 'lucide-react'
+import { toPng } from 'html-to-image'
 import { Thumbnail, type AdCreative } from './AdAnalysisView'
 
 interface Props {
@@ -308,6 +309,11 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
       .map(saturation).sort((a, b) => a - b)
     const engMedian = engSats.length ? quantile(engSats, 0.5) : 0.5
     const NEW_MOF_WARMTH = 0.4
+    // A prospecting-dominant creative that's been hammered (top-quartile
+    // freq/CPMr for THIS account) is still bottom-of-funnel — "still new, just
+    // saturated." Without this, prospecting-heavy accounts (e.g. Freewrite)
+    // never fill BOF because they have no engaged-dominant creatives at all.
+    const COLD_BOF_SATURATION = 0.75
 
     const laneForMeasured = (p: Pre): Lane => {
       if (p.dominant === 'unknown') return rangeBySaturation(p)
@@ -316,7 +322,9 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
       if (isExistingTop(sh)) return 'REACT'
       if (isEngagedTop(sh)) return saturation(p) >= engMedian ? 'BOF' : 'MOF'
       // prospecting-dominant
-      return warmthOf(sh) >= NEW_MOF_WARMTH ? 'MOF' : 'TOF'
+      if (warmthOf(sh) >= NEW_MOF_WARMTH) return 'MOF'          // warming audience
+      if (saturation(p) >= COLD_BOF_SATURATION) return 'BOF'    // cold but saturated
+      return 'TOF'
     }
 
     return pre.map(p => ({
@@ -357,6 +365,35 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
     a.download = `${brand.replace(/[^a-z0-9]+/gi, '-')}-funnel.csv`
     a.click()
     URL.revokeObjectURL(a.href)
+  }
+
+  // PNG export: snapshot the whole funnel at natural size (transform reset so
+  // it captures every lane, not just the visible viewport).
+  const [exporting, setExporting] = useState(false)
+  const exportPng = async () => {
+    const canvas = canvasRef.current
+    if (!canvas || exporting) return
+    setExporting(true)
+    const prevT = canvas.style.transform
+    const prevTr = canvas.style.transition
+    canvas.style.transition = 'none'
+    canvas.style.transform = 'translate(0px,0px) scale(1)'
+    try {
+      const url = await toPng(canvas, {
+        backgroundColor: '#f4f2ee', pixelRatio: 2, cacheBust: true,
+        width: canvas.offsetWidth, height: canvas.offsetHeight,
+      })
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${brand.replace(/[^a-z0-9]+/gi, '-')}-funnel.png`
+      a.click()
+    } catch (e) {
+      console.error('[funnel] PNG export failed', e)
+    } finally {
+      canvas.style.transform = prevT
+      canvas.style.transition = prevTr
+      setExporting(false)
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -560,6 +597,9 @@ export function HypotheticalFunnelView({ ads, brand, height = '100%' }: Props) {
         <button onClick={exportCsv}
           className="px-2 py-0.5 rounded text-[10px] text-neutral-600 hover:bg-black/[0.05] font-sans flex items-center gap-1 border border-black/10 bg-white/70"
           title="Export ad titles + Meta links by section (CSV)">↓ CSV</button>
+        <button onClick={exportPng} disabled={exporting}
+          className="px-2 py-0.5 rounded text-[10px] text-neutral-600 hover:bg-black/[0.05] font-sans flex items-center gap-1 border border-black/10 bg-white/70 disabled:opacity-50"
+          title="Export the whole funnel as a PNG image">{exporting ? '…' : '↓ PNG'}</button>
         <button onClick={resetView}
           className="px-2 py-0.5 rounded text-[10px] text-neutral-500 hover:bg-black/[0.05] font-sans"
           title="Reset view">reset</button>

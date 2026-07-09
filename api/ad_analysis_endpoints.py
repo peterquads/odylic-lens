@@ -1436,6 +1436,62 @@ def _get_meta_accounts() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Graph API rate limiter — protects the user's Meta app from getting throttled
+# (or the account flagged) when a brand load fans out to ~60+ per-ad calls.
+# Enforces a minimum interval between Graph requests and backs off hard when
+# Meta's X-App-Usage / X-Business-Use-Case-Usage headers say we're near a cap.
+# ---------------------------------------------------------------------------
+class _GraphRateLimiter:
+    def __init__(self, min_interval: float = 0.12):
+        self._lock = threading.Lock()
+        self._next = 0.0
+        self._backoff_until = 0.0
+        self.min_interval = min_interval
+
+    def wait(self) -> None:
+        with self._lock:
+            start = max(time.time(), self._next, self._backoff_until)
+            self._next = start + self.min_interval
+        delay = start - time.time()
+        if delay > 0:
+            time.sleep(delay)
+
+    def note_usage(self, resp) -> None:
+        """Read Meta's usage headers; if any metric ≥ 90% of the cap, pause all
+        Graph traffic for a cooldown so we never trip the hard block."""
+        try:
+            worst = 0.0
+            for h in ("x-app-usage", "x-business-use-case-usage", "x-ad-account-usage"):
+                raw = resp.headers.get(h)
+                if not raw:
+                    continue
+                data = json.loads(raw)
+                buckets = []
+                if isinstance(data, dict):
+                    if any(k in data for k in ("call_count", "total_time", "total_cputime", "acc_id_util_pct")):
+                        buckets = [data]
+                    else:
+                        for v in data.values():
+                            if isinstance(v, list):
+                                buckets += [x for x in v if isinstance(x, dict)]
+                for b in buckets:
+                    for k in ("call_count", "total_time", "total_cputime", "acc_id_util_pct"):
+                        try:
+                            worst = max(worst, float(b.get(k, 0) or 0))
+                        except (TypeError, ValueError):
+                            pass
+            if worst >= 90:
+                with self._lock:
+                    self._backoff_until = max(self._backoff_until, time.time() + 90)
+                print(f"[graph-limiter] usage {worst:.0f}% — backing off 90s", flush=True)
+        except Exception:
+            pass
+
+
+_GRAPH_LIMITER = _GraphRateLimiter()
+
+
+# ---------------------------------------------------------------------------
 # Meta fetch helpers
 # ---------------------------------------------------------------------------
 
@@ -1468,7 +1524,9 @@ def _fetch_ad_insights(account_id: str, start: str, end: str, token: str) -> lis
     rows: list[dict] = []
     next_url: Optional[str] = None
     for _ in range(10):  # up to 10 pages (5,000 ads. far more than real-world)
+        _GRAPH_LIMITER.wait()
         resp = req.get(next_url or url, params=None if next_url else params, timeout=120)
+        _GRAPH_LIMITER.note_usage(resp)
         data = resp.json()
         if "error" in data:
             _note_meta_rate_limit(data["error"])
@@ -1521,7 +1579,9 @@ def _fetch_ad_insights_with_breakdowns(
     # rows = 12,500 cells, comfortably above what any single brand produces
     # for a 30-day window.
     for _ in range(25):
+        _GRAPH_LIMITER.wait()
         resp = req.get(next_url or url, params=None if next_url else params, timeout=120)
+        _GRAPH_LIMITER.note_usage(resp)
         data = resp.json()
         if "error" in data:
             _note_meta_rate_limit(data["error"])
@@ -1834,7 +1894,9 @@ def _fetch_ad_creative(
         "}"
     )
     url = f"https://graph.facebook.com/{META_API_VERSION}/{ad_id}"
+    _GRAPH_LIMITER.wait()
     resp = req.get(url, params={"access_token": token, "fields": fields}, timeout=60)
+    _GRAPH_LIMITER.note_usage(resp)
     try:
         _observe_meta_usage_headers(getattr(resp, "headers", {}) or {})
     except Exception:
@@ -2722,11 +2784,12 @@ def _list_creatives_impl(brand: str, start: str, end: str, limit: int = 100) -> 
     insights.sort(key=lambda r: float(r.get("spend", 0) or 0), reverse=True)
     insights = [r for r in insights if float(r.get("spend", 0) or 0) > 0][:limit]
 
-    # Real funnel mix (user_segment_key) + inferred reactivation flag. Both are
-    # best-effort enrichments fetched once per brand; failures degrade to empty
-    # so the core creatives payload always ships.
+    # Real funnel mix (user_segment_key). Best-effort; failure degrades to empty
+    # so the core creatives payload always ships. NOTE: we no longer pull ad-set
+    # targeting for a "reactivation" flag — the viewer derives reactivation from
+    # existing-segment dominance, so that extra paginated Graph call (and its
+    # rate-limit cost) is pure waste.
     segment_by_ad = _fetch_ad_segment_spend(account_id, start, end, token)
-    reactivation_adsets = _fetch_adset_reactivation(account_id, token)
 
     # Fetch creative metadata for each ad. If Meta's rate-limit cooldown
     # trips mid-loop, stop calling Meta and still return what we've built
@@ -2781,7 +2844,7 @@ def _list_creatives_impl(brand: str, start: str, end: str, limit: int = 100) -> 
         # placement in the Hypothetical Funnel Viewer (replaces the freq/CPMr
         # guess). Empty blend is a valid state (ad had no segmented delivery).
         merged["segment_spend"] = segment_by_ad.get(str(ad_id)) or _empty_segment_spend()
-        merged["reactivation"] = str(row.get("adset_id")) in reactivation_adsets
+        merged["reactivation"] = False  # derived from existing-segment dominance in the UI
         # Parse naming conventions on both ad + adset so the UI can light
         # up Funnel / Bidding / Persona-hint columns without a round trip.
         merged["name_convention"] = {
