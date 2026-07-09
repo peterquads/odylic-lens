@@ -102,18 +102,27 @@ cat > "$INSTALL_DIR/start.sh" <<'EOF'
 #!/usr/bin/env bash
 set -e
 cd "$(dirname "$0")"
-# API
+# Single port. install.sh prebuilds web/dist and the API serves the SPA
+# from :8765, so everything (funnel viewer, setup wizard, OAuth) lives on
+# one origin. Vite dev is only started as a fallback when the bundle is
+# missing (someone deleted web/dist or is doing HMR dev work).
 (cd api && source venv/bin/activate && python main.py) &
 API_PID=$!
-# Web
-(cd web && npm run dev) &
-WEB_PID=$!
-echo ""
-echo "  API: http://localhost:8765"
-echo "  Web: http://localhost:5173"
-echo "  Ctrl+C to stop both."
-trap 'kill $API_PID $WEB_PID 2>/dev/null' EXIT INT TERM
-wait
+if [ -f web/dist/index.html ]; then
+  echo ""
+  echo "  Odylic Funnel Viewer → http://localhost:8765/funnel-demo"
+  echo "  Ctrl+C to stop."
+  trap 'kill $API_PID 2>/dev/null' EXIT INT TERM
+  wait
+else
+  (cd web && npm run dev) &
+  WEB_PID=$!
+  echo ""
+  echo "  API: http://localhost:8765   ·   Web (dev fallback): http://localhost:5173"
+  echo "  Ctrl+C to stop both."
+  trap 'kill $API_PID $WEB_PID 2>/dev/null' EXIT INT TERM
+  wait
+fi
 EOF
 chmod +x "$INSTALL_DIR/start.sh"
 
@@ -157,7 +166,7 @@ echo "  Next:"
 echo "    1) Edit $INSTALL_DIR/.env (add META_APP_ID + META_APP_SECRET)"
 [ -n "$INSTALLED_CLI" ] && echo "    2) Run: lens start"
 [ -z "$INSTALLED_CLI" ] && echo "    2) Run: $INSTALL_DIR/start.sh"
-echo "    3) Open: http://localhost:8765  (or launch from Applications)"
+echo "    3) Open: http://localhost:8765/funnel-demo  (or launch from Applications)"
 echo ""
 echo "  Update later with:  lens update"
 echo ""

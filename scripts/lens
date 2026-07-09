@@ -46,7 +46,7 @@ _start() {
   # below kicks in only when someone deleted web/dist (or is doing
   # dev work and wants HMR).
   if [ -f "$LENS_DIR/web/dist/index.html" ]; then
-    echo "  ui  → http://localhost:8765  (served by API from prebuilt bundle)"
+    echo "  ui  → http://localhost:8765/funnel-demo  (served by API from prebuilt bundle)"
     return
   fi
   if _alive "$RUN/web.pid"; then
