@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Odylic Lens — one-line installer for macOS / Linux.
+# Odylic Funnel Viewer — one-line installer for macOS / Linux.
 # Usage: curl -fsSL https://raw.githubusercontent.com/peterquads/odylic-lens/main/install.sh | bash
 set -e
 
@@ -7,9 +7,9 @@ REPO="${ODYLIC_LENS_REPO:-peterquads/odylic-lens}"
 INSTALL_DIR="${ODYLIC_LENS_DIR:-$HOME/odylic-lens}"
 
 echo ""
-echo "  ╔════════════════════════════════╗"
-echo "  ║   Installing Odylic Lens       ║"
-echo "  ╚════════════════════════════════╝"
+echo "  ╔═════════════════════════════════════╗"
+echo "  ║   Installing Odylic Funnel Viewer   ║"
+echo "  ╚═════════════════════════════════════╝"
 echo ""
 
 # 1) Prereqs

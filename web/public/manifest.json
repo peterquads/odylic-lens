@@ -1,7 +1,7 @@
 {
-  "name": "Atelier",
-  "short_name": "Atelier",
-  "description": "Atelier — unified media buying workspace",
+  "name": "Odylic Funnel Viewer",
+  "short_name": "Funnel Viewer",
+  "description": "Atelier \u2014 unified media buying workspace",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f7f2ea",
