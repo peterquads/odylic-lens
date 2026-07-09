@@ -35,7 +35,7 @@ router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 # Validation
 # ─────────────────────────────────────────────────────────────────────
 
-_KNOWN_PROVIDERS = {"atria", "anthropic"}
+_KNOWN_PROVIDERS = {"atria", "anthropic", "ads_library"}
 
 
 class SaveKeyRequest(BaseModel):
@@ -60,6 +60,19 @@ def _validate(provider: str, api_key: str) -> str:
                 400,
                 "Anthropic API keys start with 'sk-ant-'. Get one at https://console.anthropic.com/settings/keys."
             )
+    if provider == "ads_library":
+        # App access tokens are `{app_id}|{app_secret}`; user access
+        # tokens (rarer here) are long opaque strings. Accept either —
+        # the only hard requirement is the pipe-form looks well-formed
+        # if a pipe is present, so we catch the common paste error of
+        # forgetting half.
+        if "|" in key:
+            left, _, right = key.partition("|")
+            if not left.isdigit() or not right:
+                raise HTTPException(
+                    400,
+                    "App access token must be `{app_id}|{app_secret}` — App ID is all digits, secret is a long hex string."
+                )
     # Atria: prefer keys like `atria_xxx` but don't reject. Atria has been
     # known to issue keys with different prefixes for partner integrations.
     return key
@@ -148,6 +161,35 @@ def get_anthropic(lens_session: Optional[str] = Cookie(None)):
 @router.delete("/anthropic")
 def delete_anthropic(lens_session: Optional[str] = Cookie(None)):
     return _delete("anthropic", lens_session)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Ads Library token. Public, no-OAuth path.
+#
+# Default resolution (in ``ads_library_endpoints._bundled_token``) is
+# ``LENS_LIBRARY_TOKEN`` env → ``META_APP_ID|META_APP_SECRET`` env →
+# UI-stored Meta App creds. A user who wants to override the default
+# (e.g. with a token from a different Meta App, or an Odylic-hosted
+# token) can paste it here and we read it before falling back to env.
+# ─────────────────────────────────────────────────────────────────────
+
+@router.post("/ads_library")
+def save_ads_library(
+    body: SaveKeyRequest,
+    lens_session: Optional[str] = Cookie(None),
+    _rl=Depends(rate_limited("integrations/ads_library/save", limit=10)),
+):
+    return _save("ads_library", body, lens_session)
+
+
+@router.get("/ads_library")
+def get_ads_library(lens_session: Optional[str] = Cookie(None)):
+    return _get("ads_library", lens_session)
+
+
+@router.delete("/ads_library")
+def delete_ads_library(lens_session: Optional[str] = Cookie(None)):
+    return _delete("ads_library", lens_session)
 
 
 # ─────────────────────────────────────────────────────────────────────

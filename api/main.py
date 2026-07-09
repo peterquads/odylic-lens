@@ -47,6 +47,7 @@ from transcription import router as transcribe_router
 from ads_reports_endpoints import router as ads_reports_router
 from boards_endpoints import router as boards_router
 from atria_endpoints import router as atria_router
+from ads_library_endpoints import router as ads_library_router
 
 app = FastAPI(
     title="Odylic Lens API",
@@ -98,6 +99,7 @@ app.include_router(integrations_router)
 app.include_router(ads_reports_router)
 app.include_router(boards_router)
 app.include_router(atria_router)
+app.include_router(ads_library_router)
 app.include_router(lens_router)
 app.include_router(transcribe_router)
 

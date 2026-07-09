@@ -142,6 +142,15 @@ def status(lens_session: Optional[str] = Cookie(None)):
     """Lightweight status. does this deployment have a Meta App configured
     and is the current visitor logged in?"""
     creds = _credentials()
+    # Library mode is "available" whenever either a pre-baked Library
+    # token or app creds (which we'll concat into an app access token)
+    # are present. App creds being set also means the BYO Insights path
+    # is configured, but the frontend can still offer Library as a
+    # zero-config alternative for users who don't want to OAuth.
+    library_available = bool(
+        os.environ.get("LENS_LIBRARY_TOKEN")
+        or (creds.get("META_APP_ID") and creds.get("META_APP_SECRET"))
+    )
     return {
         "app_configured": _credentials_configured(),
         "logged_in": bool(current_user_id(lens_session)),
@@ -149,6 +158,7 @@ def status(lens_session: Optional[str] = Cookie(None)):
         "app_id_preview": (creds.get("META_APP_ID")[-4:] if creds.get("META_APP_ID") else None),
         "redirect_uri": _redirect_uri(),
         "config_source": "env" if os.environ.get("META_APP_ID") else ("file" if creds.get("META_APP_ID") else "unset"),
+        "library_available": library_available,
     }
 
 

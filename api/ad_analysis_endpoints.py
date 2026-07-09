@@ -4548,7 +4548,12 @@ def img_by_ad(
         candidates = [creative.get("thumbnail_url"), creative.get("image_url")]
     else:
         candidates = [creative.get("image_url"), creative.get("thumbnail_url")]
-    candidates = [u for u in candidates if u]
+    # Drop page-avatar / profile-crop / placeholder URLs (e.g. the Page-logo
+    # `thumbnail_url` Meta returns for video/DPA/IG ads on a limited-scope
+    # token). Emptying the list here routes us to the /previews extractor,
+    # which finds the REAL creative and already ignores these same paths —
+    # so we stop rendering a wall of identical page logos.
+    candidates = [u for u in candidates if u and not _is_blacklisted_img_url(u)]
     # Final fallback: render the ad via /previews and extract the creative
     # image URL from the rendered iframe HTML. This is the path that
     # works for DPA/dark-post/dynamic-creative ads where no
@@ -4943,6 +4948,15 @@ _AD_IMG_PATH_RE = re.compile(
 _BLACKLIST_IMG_PATHS = (
     # Page-avatar paths. never a real creative.
     't39.1997', 't39.7142',
+    # Page/profile-picture CROP specs. When an ad exposes no real creative
+    # image (video-only, dynamic/DPA, IG-placement ads on a limited-scope
+    # app token), `creative.thumbnail_url` falls back to the Page's profile
+    # picture, served as a square pWxH crop (e.g. the 200×200 green "JIAJIA"
+    # logo we saw served identically across dozens of ads). Block the profile
+    # crop specs so that fallback drops out of the candidate list and we try
+    # the /previews render (which finds the real creative) instead.
+    'p200x200', 'p160x160', 'p100x100', 'p50x50',
+    'platform-lookaside.fbsbx.com',
     # Tiny thumbnail variants. Meta serves these when no real creative is
     # available. Catching them here prevents low-res poster art from
     # masquerading as the ad image.
@@ -4953,6 +4967,16 @@ _BLACKLIST_IMG_PATHS = (
     # 2026-05-04). Block by URL substring so we never recommend them.
     'fb_icon', 'fb_logo', 'rsrc.php',
 )
+
+
+def _is_blacklisted_img_url(url: str) -> bool:
+    """True if the URL is a page-avatar / profile-crop / placeholder path
+    that must never be served as an ad creative. Same rules the preview
+    extractor and og:image scrape already trust — applied here to the
+    img-by-ad candidate list so the Page-logo fallback can't slip through."""
+    if not url:
+        return True
+    return any(bad in url for bad in _BLACKLIST_IMG_PATHS)
 
 
 def _scrape_og_image(page_url: str) -> Optional[str]:

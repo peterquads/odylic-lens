@@ -77,6 +77,7 @@ export default function ApiSettings() {
       </header>
 
       <MetaSection auth={auth} me={me} onChange={refreshAll} nav={nav} />
+      <AdsLibrarySection />
       <AnthropicSection />
       <AtriaSection />
       <TranscriptionSection />
@@ -311,6 +312,61 @@ function AnthropicSection() {
   );
 }
 
+
+// ─────────────────────────────────────────────────────────────────────
+// Ads Library section
+//
+// The bundled-creds path. The default resolution chain falls back to
+// META_APP_ID|META_APP_SECRET (which any configured Lens already has),
+// so the user only needs this UI if they want to override with a token
+// from a different Meta App or a hosted Odylic token. Sub-caption
+// tells them where the active token is coming from right now.
+// ─────────────────────────────────────────────────────────────────────
+
+function AdsLibrarySection() {
+  const [libStatus, setLibStatus] = useState<{ available: boolean; source: string } | null>(null);
+
+  useEffect(() => {
+    endpoints.adsLibraryStatus().then(setLibStatus).catch(() => setLibStatus(null));
+  }, []);
+
+  const sourceLabel: Record<string, string> = {
+    settings_override: "this Settings override (below)",
+    env_token: "LENS_LIBRARY_TOKEN env var",
+    env_app: "META_APP_ID|META_APP_SECRET env vars",
+    file_app: "Meta App creds from Setup",
+    unset: "nothing — Library mode is disabled",
+  };
+  const source = libStatus?.source || "unset";
+
+  return (
+    <IntegrationCard
+      title="Meta Ads Library. Public ads search"
+      caption={
+        <>
+          Powers the <em>Browse Ads Library</em> path on the Landing page,
+          and gets injected into <em>Deep profile</em> generation so Claude
+          can read a brand's real Meta ads, not just their website.
+          {libStatus ? (
+            <>
+              {" "}Currently using <strong>{sourceLabel[source]}</strong>.
+              {libStatus.available ? " Ready." : " Not configured — paste a token below or finish Setup."}
+            </>
+          ) : null}
+          <br />
+          Override only if you want to use a different Meta App than the
+          one Lens connects with. Format: <code>{`{app_id}|{app_secret}`}</code>.
+        </>
+      }
+      placeholder="1234567890123456|abcdef0123456789abcdef0123456789"
+      getKeyUrl="https://developers.facebook.com/apps"
+      getKeyLabel="Get App ID/Secret →"
+      load={() => endpoints.getAdsLibrary()}
+      save={(api_key) => endpoints.saveAdsLibrary({ api_key }).then(() => undefined)}
+      remove={() => endpoints.removeAdsLibrary().then(() => undefined)}
+    />
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Atria section

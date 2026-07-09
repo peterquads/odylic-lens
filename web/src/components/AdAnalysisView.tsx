@@ -702,13 +702,25 @@ export function Thumbnail({
     // CDN proxy URL has rotated since the dashboard pulled it. Detail
     // panel already does this; grid was skipping it (cause of "preview
     // only shows after clicking").
+    const proxyUrl = toProxyImg(ad.image_url_hd || ad.image_url || ad.thumbnail_url)
+    const isLocal = typeof proxyUrl === 'string' && (proxyUrl.startsWith('data:') || proxyUrl.startsWith('blob:'))
+    if (isLocal) {
+      // Demo/sample ads carry a self-contained data-URI — use it directly,
+      // no Meta resolve needed.
+      out.push(proxyUrl as string)
+      return out
+    }
     const post = postThumbSrc(ad)
     if (post) out.push(post)
-    const proxyUrl = toProxyImg(ad.image_url_hd || ad.image_url || ad.thumbnail_url)
-    if (proxyUrl && typeof proxyUrl === 'string') out.push(proxyUrl)
+    // img-by-ad (fresh Graph resolve, disk-cached) BEFORE the stored proxy URL.
+    // The stored image_url_hd/image_url are signed Meta CDN links whose
+    // `oh=`/`oe=` signatures expire within hours of the pull → the proxy 403s
+    // on them. img-by-ad re-resolves live and reliably 200s, so trying it
+    // first (after the free og:image scrape) is what actually fills the grid.
     out.push(
       `/api/ads/img-by-ad?ad_id=${encodeURIComponent(ad.ad_id)}&brand=${encodeURIComponent(brand)}&kind=auto&s=${SESSION_NONCE}`,
     )
+    if (proxyUrl && typeof proxyUrl === 'string') out.push(proxyUrl)
     return out
   }, [ad.effective_object_story_id, ad.image_url_hd, ad.image_url, ad.thumbnail_url, ad.ad_id, brand, isReport])
 

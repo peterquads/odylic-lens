@@ -453,6 +453,107 @@ def _scrape_brand_site(domain: str, max_chars_total: int = 60000) -> tuple[str, 
     return "\n".join(out_parts), visual_hints
 
 
+def _fetch_recent_ads_for_prompt(brand: str, max_ads: int = 15, countries: tuple[str, ...] = ("US",)) -> str:
+    """Pull the brand's recent public Meta ads via the Ads Library API,
+    formatted as a compact text block for the deep-profile prompt.
+
+    Returns an empty string when:
+      - no Library token is configured (Library mode disabled),
+      - the brand name returns zero ads,
+      - the Library API errors.
+
+    Best-effort by design — brand discovery should still work without
+    ads (just with poorer voice/positioning fidelity). We use
+    ``search_terms=<brand>`` rather than ``search_page_ids`` so a user
+    researching a competitor brand they don't own the Page ID for
+    still gets results.
+
+    Output shape is one ad per block:
+        [<page_name>] (start_date → end_date | platforms)
+        TITLE: ...
+        BODY: ...
+    Trimmed to ~6000 chars total so it doesn't dominate the prompt.
+    """
+    import requests as _requests
+
+    try:
+        from ads_library_endpoints import _bundled_token, LIBRARY_TIMEOUT
+        from meta_client import GRAPH_BASE as _GRAPH
+    except Exception:
+        return ""
+
+    token = _bundled_token()
+    if not token:
+        return ""
+
+    countries_lit = f"[{','.join(repr(c) for c in countries)}]"
+    params = [
+        ("access_token", token),
+        ("ad_reached_countries", countries_lit),
+        ("ad_active_status", "ALL"),
+        ("ad_type", "ALL"),
+        ("fields", "ad_creative_bodies,ad_creative_link_titles,ad_delivery_start_time,ad_delivery_stop_time,publisher_platforms,page_name"),
+        ("search_terms", brand),
+        ("limit", str(max_ads)),
+    ]
+    try:
+        r = _requests.get(f"{_GRAPH}/ads_archive", params=params, timeout=LIBRARY_TIMEOUT)
+        j = r.json()
+    except Exception as e:
+        print(f"[deep-profile] Ads Library fetch failed for {brand!r}: {e}", flush=True)
+        return ""
+    if "error" in j or not isinstance(j.get("data"), list):
+        return ""
+
+    # Filter to ads whose page_name actually looks like the brand. The
+    # Library does fuzzy text matching on ad copy, so a search for
+    # "Allbirds" can return ads from random shoe retailers that just
+    # mention Allbirds. Heuristic: page_name must share a token with
+    # the brand name (case-insensitive).
+    brand_tokens = {t for t in brand.lower().split() if len(t) > 2}
+    rows: list[dict] = []
+    for ad in j["data"]:
+        pn = (ad.get("page_name") or "").lower()
+        if brand_tokens and not any(t in pn for t in brand_tokens):
+            continue
+        rows.append(ad)
+    if not rows:
+        # Fallback: if filtering killed everything, return the raw set
+        # rather than nothing. Better to give Claude noisy data than
+        # zero data.
+        rows = j["data"]
+
+    parts: list[str] = []
+    budget = 6000
+    for ad in rows:
+        pn = ad.get("page_name") or brand
+        start = (ad.get("ad_delivery_start_time") or "").split("T")[0]
+        stop = (ad.get("ad_delivery_stop_time") or "").split("T")[0]
+        platforms = ", ".join(ad.get("publisher_platforms") or [])
+        title = (ad.get("ad_creative_link_titles") or [None])[0]
+        body = (ad.get("ad_creative_bodies") or [None])[0]
+        # Drop nothing-useful entries (Meta sometimes returns ads where
+        # the creative body is just a single emoji or whitespace).
+        if not (title or body):
+            continue
+        block = (
+            f"[{pn}] ({start}{f' → {stop}' if stop else ' → present'}"
+            f"{f' | {platforms}' if platforms else ''})\n"
+        )
+        if title:
+            block += f"TITLE: {title.strip()}\n"
+        if body:
+            # Cap individual ad bodies at 600 chars so one long ad
+            # doesn't eat the budget.
+            block += f"BODY: {body.strip()[:600]}\n"
+        if len(block) > budget:
+            break
+        parts.append(block)
+        budget -= len(block)
+
+    return "\n".join(parts)
+
+
 @router.post("/api/profile/generate-deep")
 def generate_deep_profile(brand: str, lens_session: Optional[str] = Cookie(None)) -> dict:
     """Generate a rich brand profile via Claude Sonnet, merged into any
@@ -508,6 +609,17 @@ def generate_deep_profile(brand: str, lens_session: Optional[str] = Cookie(None)
     # on a slow server.
     site_excerpt, visual_hints = _scrape_brand_site(seed_domain) if seed_domain else ("", {})
 
+    # Pull recent Meta ads via the public Ads Library API. This gives
+    # Claude access to the brand's *paid* voice — ad hooks, value props
+    # they actually run in market, current promo angles — which is often
+    # sharper than homepage copy (homepages get stale, ads churn weekly).
+    # Best-effort: if no Library token is configured or the brand has no
+    # recent ads, we silently skip. We DON'T pull from the brand's
+    # private Insights API here, even if Lens is BYO-connected — Library
+    # is the right source because it works for any brand the user is
+    # researching, not just the ones they own ad accounts on.
+    ads_excerpt = _fetch_recent_ads_for_prompt(brand)
+
     # Build the prompt. If the user supplied a domain, pin Claude to it
     # so it doesn't wander off into a same-name brand in another market.
     domain_clause = (
@@ -533,9 +645,20 @@ def generate_deep_profile(brand: str, lens_session: Optional[str] = Cookie(None)
             "and brand_fonts / typography_display / typography_body. Don't invent random hex codes.\n"
             "--- END VISUAL SIGNALS ---\n"
         )
+    ads_clause = ""
+    if ads_excerpt:
+        ads_clause = (
+            "\n--- RECENT META ADS (public Ads Library) ---\n"
+            f"{ads_excerpt}\n"
+            "Treat these as the brand's CURRENT paid voice. Use ad copy as primary "
+            "evidence for do_say / dont_say / example_snippets / voice_tone / voice_attributes / "
+            "proof_points / objections / unique_value_props. Where homepage copy and ad copy "
+            "disagree, prefer the ad copy — it's what the brand is putting money behind right now.\n"
+            "--- END RECENT META ADS ---\n"
+        )
     prompt = (
         f'You are a Senior Brand Strategist building a COMPREHENSIVE brand identity '
-        f'dossier for the DTC brand "{brand}".{domain_clause}{site_clause}{visual_clause}\n\n'
+        f'dossier for the DTC brand "{brand}".{domain_clause}{site_clause}{visual_clause}{ads_clause}\n\n'
         'Return ONLY a single JSON object with this exact shape (no prose, no code fences). '
         'Every field listed must be populated. Use `null` ONLY when the site extract, '
         'visual signals, AND your training knowledge all genuinely lack the information.\n\n'

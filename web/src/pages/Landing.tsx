@@ -68,6 +68,35 @@ export default function Landing({ auth }: { auth: AuthStatus | null }) {
             <Link to="/setup" className="btn">Start setup →</Link>
           </div>
         )}
+
+        {/* Alt path: the bundled Ads Library token works without OAuth, so
+            a fresh install can jump straight into competitor / industry
+            research. Spend/ROAS/CTR aren't available on this path (Meta
+            doesn't expose them in the public Ads Library), but creative
+            payload + delivery window + countries / platforms all are. */}
+        {auth?.library_available ? (
+          <div style={{ marginTop: 20 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 8, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              or — no setup, no login
+            </div>
+            <Link
+              to="/library"
+              className="btn"
+              style={{
+                fontSize: 12,
+                padding: "10px 20px",
+                background: "transparent",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Browse the public Ads Library →
+            </Link>
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+              Creative + delivery only. No spend / CTR / ROAS — those require connecting your Meta account.
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div style={{ marginTop: 64, marginBottom: 24, maxWidth: 960, marginLeft: "auto", marginRight: "auto" }}>

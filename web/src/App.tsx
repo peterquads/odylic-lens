@@ -14,6 +14,7 @@ import { DatePicker } from './components/DatePicker'
 import Landing from './pages/Landing'
 import Setup from './pages/Setup'
 import ApiSettings from './pages/ApiSettings'
+const AdsLibraryView = lazy(() => import('./pages/AdsLibrary'))
 const FunnelDemoView = lazy(() => import('./pages/FunnelDemo'))
 import { endpoints, type AuthStatus } from './lib/api'
 
@@ -284,9 +285,9 @@ function RoutedApp() {
   useEffect(() => {
     if (loading) return
     if (!auth?.app_configured) {
-      // / and the public demo are zero-config — let users land there without
+      // /library and / are zero-config — let users land there without
       // forcing them through Setup. Everything else still gets bounced.
-      const zeroConfigPaths = ['/setup', '/', '/funnel-demo']
+      const zeroConfigPaths = ['/setup', '/library', '/', '/funnel-demo']
       if (!zeroConfigPaths.includes(loc.pathname)) nav('/setup', { replace: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -303,6 +304,11 @@ function RoutedApp() {
   return (
     <Routes>
       <Route path="/setup" element={<Setup auth={auth} />} />
+      <Route path="/library" element={
+        <Suspense fallback={<LazyFallback />}>
+          <AdsLibraryView />
+        </Suspense>
+      } />
       <Route path="/funnel-demo" element={
         <Suspense fallback={<LazyFallback />}>
           <FunnelDemoView />

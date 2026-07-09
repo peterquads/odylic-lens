@@ -56,6 +56,47 @@ export interface AuthStatus {
   app_id_preview?: string | null;
   redirect_uri?: string;
   config_source?: "env" | "file" | "unset";
+  /** True when the bundled Ads Library token path is usable (env token
+   *  or app creds present). Frontend uses this to surface the
+   *  zero-config "Browse Ads Library" CTA on Landing/Setup. */
+  library_available?: boolean;
+}
+
+export interface AdsLibraryStatus {
+  available: boolean;
+  source: "settings_override" | "env_token" | "env_app" | "file_app" | "unset";
+}
+
+export interface AdsLibraryAd {
+  id: string;
+  ad_creation_time?: string;
+  ad_creative_bodies?: string[];
+  ad_creative_link_captions?: string[];
+  ad_creative_link_descriptions?: string[];
+  ad_creative_link_titles?: string[];
+  ad_delivery_start_time?: string;
+  ad_delivery_stop_time?: string;
+  ad_snapshot_url?: string;
+  languages?: string[];
+  page_id?: string;
+  page_name?: string;
+  publisher_platforms?: string[];
+  ad_reached_countries?: string[];
+  /** Only populated for political/issue ads or EU (DSA) deliveries. */
+  impressions?: { lower_bound?: string; upper_bound?: string };
+  spend?: { lower_bound?: string; upper_bound?: string };
+  currency?: string;
+  demographic_distribution?: Array<{
+    percentage: string;
+    age: string;
+    gender: string;
+  }>;
+  delivery_by_region?: Array<{ percentage: string; region: string }>;
+}
+
+export interface AdsLibrarySearchResponse {
+  data: AdsLibraryAd[];
+  paging?: { cursors?: { before?: string; after?: string }; next?: string };
 }
 
 export interface CredentialCheck {
@@ -203,6 +244,15 @@ export const endpoints = {
   removeAnthropic: () =>
     request<{ ok: true; provider: "anthropic" }>("/api/integrations/anthropic", { method: "DELETE" }),
 
+  // Ads Library override token. Optional — when set, beats the
+  // env-driven default (META_APP_ID|META_APP_SECRET). Same encrypted
+  // SQLite path as Atria/Anthropic; plaintext never returned.
+  getAdsLibrary: () => api.get<IntegrationStatus>("/api/integrations/ads_library"),
+  saveAdsLibrary: (body: { api_key: string }) =>
+    api.post<{ ok: true; provider: "ads_library"; last_4: string | null }>("/api/integrations/ads_library", body),
+  removeAdsLibrary: () =>
+    request<{ ok: true; provider: "ads_library" }>("/api/integrations/ads_library", { method: "DELETE" }),
+
   refreshAccounts: () => api.post<{ count: number; accounts: AdAccount[] }>("/api/accounts/refresh"),
   listAccounts: (includeHidden = false) =>
     api.get<{ count: number; accounts: AdAccount[]; hint?: string }>(
@@ -227,6 +277,34 @@ export const endpoints = {
     ),
   qc: (id: string, since: string, until: string) =>
     api.get<QcReport>(`/api/accounts/${encodeURIComponent(id)}/qc?since=${since}&until=${until}`),
+
+  // Meta Ads Library API — public, no-OAuth path. Available whenever a
+  // bundled token can be resolved server-side; the Landing page reads
+  // `auth.library_available` to decide whether to show the alt CTA.
+  adsLibraryStatus: () => api.get<AdsLibraryStatus>("/api/ads-library/status"),
+  adsLibrarySearch: (params: {
+    search_terms?: string;
+    search_page_ids?: string;
+    ad_reached_countries?: string;
+    ad_active_status?: "ALL" | "ACTIVE" | "INACTIVE";
+    ad_type?: "ALL" | "POLITICAL_AND_ISSUE_ADS";
+    ad_delivery_date_min?: string;
+    ad_delivery_date_max?: string;
+    publisher_platforms?: string;
+    languages?: string;
+    limit?: number;
+    after?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+    });
+    return api.get<AdsLibrarySearchResponse>(`/api/ads-library/search?${qs.toString()}`);
+  },
+  adsLibraryPageLookup: (q: string) =>
+    api.get<{ pages: Array<{ page_id: string; page_name: string }> }>(
+      `/api/ads-library/page-lookup?q=${encodeURIComponent(q)}`
+    ),
 
   // Local audio transcription (mlx-whisper / faster-whisper). The engine
   // is selected at API startup; /status reports which one (or whether
